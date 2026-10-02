@@ -4,8 +4,12 @@ import { createInitialState, Rng, step, type Action, type CauseEvent, type World
 
 export const SEED = 42;
 
-export function baseline(data: GameData = getGameData()): WorldState {
-  return createInitialState(data, loadScenario(scenarioRaw, data));
+export type ScenarioPatch = (scenario: typeof scenarioRaw) => void;
+
+export function baseline(data: GameData = getGameData(), patch?: ScenarioPatch): WorldState {
+  const scenario = structuredClone(scenarioRaw);
+  patch?.(scenario);
+  return createInitialState(data, loadScenario(scenario, data));
 }
 
 export interface Run {
@@ -18,9 +22,10 @@ export function run(
   turns: number,
   actionsAt: (turn: number) => Action[] = () => [],
   data: GameData = getGameData(),
+  patch?: ScenarioPatch,
 ): Run {
   const rng = new Rng(SEED);
-  const states = [baseline(data)];
+  const states = [baseline(data, patch)];
   const causes: CauseEvent[][] = [[]];
   for (let t = 1; t <= turns; t++) {
     const result = step(states[t - 1]!, actionsAt(t), rng, data);
@@ -31,7 +36,7 @@ export function run(
 }
 
 export function totalMoney(state: WorldState): number {
-  let total = state.government.cash;
+  let total = state.government.cash + state.logistics.cash;
   for (const p of state.provinces) total += p.households.cash;
   for (const f of state.firms) total += f.cash;
   return total;

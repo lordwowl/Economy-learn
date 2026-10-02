@@ -15,18 +15,33 @@ import { clamp } from '../units';
 export const COMPONENT = {
   input: (good: GoodId) => `input.${good}`,
   wage: 'wage',
+  logistics: 'logistics',
   markup: 'markup',
   expectations: 'expectations',
 } as const;
 
-/** Себестоимость единицы выхода по компонентам (c_k). */
-export function unitCostBreakdown(recipe: Recipe, prices: Record<GoodId, number>, wage: number): Breakdown {
+export interface InputPrice {
+  price: number;
+  breakdown: Breakdown;
+}
+
+/**
+ * Себестоимость единицы выхода по компонентам (c_k) по ценам входов в провинции фирмы.
+ * Логистика, уже сидящая в цене входа (доставка и логистика звеньев выше), выносится в отдельную компоненту.
+ */
+export function unitCostBreakdown(recipe: Recipe, inputs: Record<GoodId, InputPrice>, wage: number): Breakdown {
   const perOutput = 1 / recipe.output.amount;
   const cost: Breakdown = {};
+  let logistics = 0;
   for (const input of recipe.inputs) {
-    cost[COMPONENT.input(input.good)] = input.amount * (prices[input.good] ?? 0) * perOutput;
+    const market = inputs[input.good];
+    const price = market?.price ?? 0;
+    const carried = market?.breakdown[COMPONENT.logistics] ?? 0;
+    cost[COMPONENT.input(input.good)] = input.amount * (price - carried) * perOutput;
+    logistics += input.amount * carried * perOutput;
   }
   cost[COMPONENT.wage] = recipe.labor * wage * perOutput;
+  if (logistics !== 0) cost[COMPONENT.logistics] = logistics;
   return cost;
 }
 

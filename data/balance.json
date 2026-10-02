@@ -63,8 +63,10 @@
     "blackMarketPremiumPerShortage": 1.0
   },
   "logistics": {
+    "fuelGood": "fuel",
     "fuelPerUnitLength": 0.02,
-    "laborPerUnit": 0.01
+    "laborPerUnit": 0.01,
+    "markup": 0.1
   },
   "cpiWeights": {
     "bread": 0.35,

@@ -1,7 +1,7 @@
 // Спрос домохозяйств (GDD 5.5).
 
 import type { Balance } from '../../data/schemas';
-import type { GoodId, Households, MarketGood } from '../state';
+import type { GoodId, Households, ProvinceMarket } from '../state';
 import { clamp } from '../units';
 
 /** s = s0 − k_r × (ставка − нейтральная), в [0, 1]. */
@@ -23,13 +23,13 @@ export interface HouseholdPlan {
 export function planHouseholdPurchases(
   households: Households,
   rate: number,
-  market: Record<GoodId, MarketGood>,
-  referenceSpendingPerCapita: number,
+  market: Record<GoodId, ProvinceMarket>,
   demand: Balance['demand'],
 ): HouseholdPlan {
   const budget = spendingShare(rate, demand) * Math.max(0, households.cash);
   const n = households.population;
-  const income = referenceSpendingPerCapita > 0 ? budget / n / referenceSpendingPerCapita : 0;
+  const ref = households.referenceSpendingPerCapita;
+  const income = ref > 0 ? budget / n / ref : 0;
 
   const wanted: Record<GoodId, number> = {};
   const minimum: Record<GoodId, number> = {};

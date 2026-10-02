@@ -3,19 +3,93 @@
   "keyRate": 0.06,
   "trust": 0.7,
   "provinces": [
-    { "id": "north", "nameKey": "province.north", "population": 300, "laborForce": 220 },
-    { "id": "center", "nameKey": "province.center", "population": 300, "laborForce": 220 },
-    { "id": "south", "nameKey": "province.south", "population": 300, "laborForce": 220 }
+    {
+      "id": "north",
+      "nameKey": "province.north",
+      "population": 300,
+      "laborForce": 220
+    },
+    {
+      "id": "center",
+      "nameKey": "province.center",
+      "population": 300,
+      "laborForce": 220
+    },
+    {
+      "id": "south",
+      "nameKey": "province.south",
+      "population": 300,
+      "laborForce": 220
+    }
   ],
   "firms": [
-    { "building": "farm", "province": "north", "count": 4 },
-    { "building": "farm", "province": "south", "count": 5 },
-    { "building": "mill", "province": "north", "count": 3 },
-    { "building": "mill", "province": "center", "count": 3 },
-    { "building": "mill", "province": "south", "count": 3 },
-    { "building": "bakery", "province": "north", "count": 4 },
-    { "building": "bakery", "province": "center", "count": 4 },
-    { "building": "bakery", "province": "south", "count": 4 },
-    { "building": "refinery", "province": "center", "count": 4 }
+    {
+      "building": "farm",
+      "province": "north",
+      "count": 4
+    },
+    {
+      "building": "farm",
+      "province": "south",
+      "count": 5
+    },
+    {
+      "building": "mill",
+      "province": "north",
+      "count": 3
+    },
+    {
+      "building": "mill",
+      "province": "center",
+      "count": 3
+    },
+    {
+      "building": "mill",
+      "province": "south",
+      "count": 3
+    },
+    {
+      "building": "bakery",
+      "province": "north",
+      "count": 4
+    },
+    {
+      "building": "bakery",
+      "province": "center",
+      "count": 4
+    },
+    {
+      "building": "bakery",
+      "province": "south",
+      "count": 4
+    },
+    {
+      "building": "refinery",
+      "province": "center",
+      "count": 4
+    }
+  ],
+  "routes": [
+    {
+      "id": "northCenter",
+      "a": "north",
+      "b": "center",
+      "length": 3,
+      "lanes": 4
+    },
+    {
+      "id": "centerSouth",
+      "a": "center",
+      "b": "south",
+      "length": 3,
+      "lanes": 4
+    },
+    {
+      "id": "northSouth",
+      "a": "north",
+      "b": "south",
+      "length": 8,
+      "lanes": 0
+    }
   ]
 }

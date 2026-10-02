@@ -33,6 +33,8 @@ export interface Households {
   population: number;
   laborForce: number;
   cash: number;
+  /** B_ref: стартовые траты на душу в этой провинции. */
+  referenceSpendingPerCapita: number;
 }
 
 export interface Province {
@@ -41,16 +43,57 @@ export interface Province {
   households: Households;
 }
 
-export interface MarketGood {
-  /** Средняя цена сделок за последний ход. */
+export interface ProvinceMarket {
+  /** Средняя цена сделок в провинции за последний ход (с доставкой). */
   price: number;
-  /** Разложение средней цены (взвешено по продажам). Σ = price. */
+  /** Разложение цены: компоненты продавцов + logistics. Σ = price. */
   breakdown: Breakdown;
-  /** P_ref: стартовая цена, опорная для спроса и базы ИПЦ. */
+  /** P_ref провинции: стартовая цена, опорная для спроса. */
   referencePrice: number;
 }
 
-export type PendingEffect = { type: 'demandRate'; delta: number };
+export interface MarketGood {
+  /** Средняя по стране цена (провинции взвешены по населению). */
+  price: number;
+  /** Разложение средней цены. Σ = price. */
+  breakdown: Breakdown;
+  /** Стартовая средняя цена — база ИПЦ. */
+  referencePrice: number;
+  provinces: Record<string, ProvinceMarket>;
+}
+
+export interface Route {
+  id: string;
+  a: string;
+  b: string;
+  length: number;
+  lanes: number;
+}
+
+/** Агрегированный частный перевозчик (GDD 5.17). */
+export interface Logistics {
+  cash: number;
+  /** Запас топлива для перевозок. */
+  fuel: number;
+  /** Заявленная работа (груз × длина) за последние ходы, последняя — в конце. */
+  workHistory: number[];
+  lastWork: number;
+  lastLabor: number;
+  /** Заявки на перевозку за прошлый ход по дорогам, отдельно для рынка входов и потребительского. */
+  requested: Record<TradePhase, Record<string, number>>;
+}
+
+export type TradePhase = 'inputs' | 'consumer';
+
+export interface RouteMetrics {
+  /** Провезено за ход (в обе стороны). */
+  flow: number;
+  capacity: number;
+  /** Не провезено из-за этой дороги — «очередь» узкого места. */
+  blocked: number;
+}
+
+export type PendingEffect = { type: 'demandRate'; delta: number } | { type: 'roadLane'; route: string };
 
 export interface Metrics {
   cpi: number;
@@ -64,8 +107,13 @@ export interface Metrics {
   output: Record<GoodId, number>;
   householdDemand: Record<GoodId, number>;
   householdPurchases: Record<GoodId, number>;
-  /** Доля неудовлетворённого спроса домохозяйств. */
+  /** Доля неудовлетворённого спроса домохозяйств по стране. */
   shortage: Record<GoodId, number>;
+  /** То же по провинциям: provinceShortage[провинция][товар]. */
+  provinceShortage: Record<string, Record<GoodId, number>>;
+  routes: Record<string, RouteMetrics>;
+  /** Работа перевозчика за ход: груз × длина. */
+  logisticsWork: number;
 }
 
 export interface WorldState {
@@ -76,9 +124,9 @@ export interface WorldState {
   keyRate: number;
   /** Ставка, на которую уже отреагировали домохозяйства (догоняет keyRate с лагом). */
   demandRate: number;
-  /** B_ref: стартовые траты домохозяйств на душу. */
-  referenceSpendingPerCapita: number;
   provinces: Province[];
+  routes: Route[];
+  logistics: Logistics;
   firms: Firm[];
   market: Record<GoodId, MarketGood>;
   government: { cash: number };
@@ -96,4 +144,4 @@ export interface WorldState {
   metrics: Metrics;
 }
 
-export type Action = { type: 'setKeyRate'; rate: number };
+export type Action = { type: 'setKeyRate'; rate: number } | { type: 'addRoadLane'; route: string };

@@ -145,4 +145,15 @@ describe('сценарии', () => {
     expect(issues).toMatch(/неизвестная провинция "nowhere"/);
     expect(issues).toMatch(/рабочая сила больше населения/);
   });
+
+  it('ловит дорогу в неизвестную провинцию, петлю и дубль', () => {
+    const bad = structuredClone(scenario);
+    bad.routes.push({ id: 'toNowhere', a: 'north', b: 'nowhere', length: 1, lanes: 1 });
+    bad.routes.push({ id: 'loop', a: 'south', b: 'south', length: 1, lanes: 1 });
+    bad.routes.push({ id: 'twin', a: 'center', b: 'north', length: 2, lanes: 1 });
+    const issues = scenarioIssues(bad).join('\n');
+    expect(issues).toMatch(/toNowhere: неизвестная провинция "nowhere"/);
+    expect(issues).toMatch(/loop ведёт в ту же провинцию/);
+    expect(issues).toMatch(/twin дублирует/);
+  });
 });

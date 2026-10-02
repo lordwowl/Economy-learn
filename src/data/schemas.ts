@@ -186,10 +186,14 @@ export const balanceSchema = z.strictObject({
     blackMarketPremiumPerShortage: nonNegative,
   }),
   logistics: z.strictObject({
+    /** Товар, который транспорт сжигает (GDD 5.2). */
+    fuelGood: id,
     /** Топливо на 1 ед. груза на единицу длины ребра. */
     fuelPerUnitLength: nonNegative,
-    /** Труд на 1 ед. груза. */
+    /** Труд на 1 ед. груза на каждое ребро пути. */
     laborPerUnit: nonNegative,
+    /** Наценка перевозчика к себестоимости перевозки. */
+    markup: nonNegative,
   }),
   /** Веса корзины ИПЦ; отсутствующие в MVP товары не указываются, веса перенормируются. */
   cpiWeights: z
@@ -232,6 +236,16 @@ export const scenarioSchema = z.strictObject({
       building: id,
       province: id,
       count: z.number().int().positive(),
+    }),
+  ),
+  /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
+  routes: z.array(
+    z.strictObject({
+      id,
+      a: id,
+      b: id,
+      length: positive,
+      lanes: z.number().int().nonnegative(),
     }),
   ),
 });
