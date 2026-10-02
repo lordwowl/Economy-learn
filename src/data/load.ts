@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   balanceSchema,
+  scenarioSchema,
   buildingsFileSchema,
   goodsFileSchema,
   recipesFileSchema,
@@ -8,6 +9,7 @@ import {
   type Building,
   type Good,
   type Recipe,
+  type Scenario,
 } from './schemas';
 
 export interface GameData {
@@ -111,4 +113,26 @@ export function loadGameData(raw: RawGameData): GameData {
   checkReferences(data, issues);
   if (issues.length > 0) throw new GameDataError(issues);
   return data;
+}
+
+/** Валидирует сценарий (стартовое состояние) против уже загруженных данных игры. */
+export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): Scenario {
+  const issues: string[] = [];
+  const scenario = parseFile(file, scenarioSchema, raw, issues);
+  if (!scenario) throw new GameDataError(issues);
+
+  checkUniqueIds(file, scenario.provinces, issues);
+  const provinceIds = new Set(scenario.provinces.map((p) => p.id));
+  const producers = new Set(data.buildings.filter((b) => b.kind === 'producer').map((b) => b.id));
+  for (const province of scenario.provinces) {
+    if (province.laborForce > province.population) {
+      issues.push(`${file}: ${province.id}: рабочая сила больше населения`);
+    }
+  }
+  for (const firm of scenario.firms) {
+    if (!producers.has(firm.building)) issues.push(`${file}: "${firm.building}" не производственное здание`);
+    if (!provinceIds.has(firm.province)) issues.push(`${file}: неизвестная провинция "${firm.province}"`);
+  }
+  if (issues.length > 0) throw new GameDataError(issues);
+  return scenario;
 }

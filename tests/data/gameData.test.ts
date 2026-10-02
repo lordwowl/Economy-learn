@@ -4,7 +4,8 @@ import buildings from '../../data/buildings.json';
 import goods from '../../data/goods.json';
 import recipes from '../../data/recipes.json';
 import ru from '../../src/i18n/ru.json';
-import { GameDataError, getGameData, loadGameData, type RawGameData } from '../../src/data';
+import scenario from '../../data/scenarios/baseline.json';
+import { GameDataError, getGameData, loadGameData, loadScenario, type RawGameData } from '../../src/data';
 
 const raw = (): RawGameData => structuredClone({ balance, goods, recipes, buildings });
 
@@ -54,9 +55,8 @@ describe('данные игры из data/', () => {
     }
   });
 
-  it('у каждого здания своя форма или вид (цвет не единственный носитель смысла)', () => {
-    const producers = getGameData().buildings.filter((b) => b.kind === 'producer');
-    const shapes = producers.map((b) => b.shape);
+  it('у каждого здания своя форма (цвет не единственный носитель смысла)', () => {
+    const shapes = getGameData().buildings.map((b) => b.shape);
     expect(new Set(shapes).size).toBe(shapes.length);
   });
 });
@@ -117,5 +117,32 @@ describe('валидация ловит ошибки', () => {
     (data.balance as typeof balance).labor.wageAdjustSpeed = -1;
     (data.goods as typeof goods).goods[0]!.id = 'Bad Id';
     expect(issuesOf(data).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('сценарии', () => {
+  const scenarioIssues = (raw: unknown): string[] => {
+    try {
+      loadScenario(raw, getGameData(), 'test.json');
+    } catch (error) {
+      if (error instanceof GameDataError) return error.issues;
+      throw error;
+    }
+    return [];
+  };
+
+  it('baseline.json валиден, у провинций есть строки в ru.json', () => {
+    expect(scenarioIssues(scenario)).toEqual([]);
+    for (const p of scenario.provinces) expect(Object.keys(ru)).toContain(p.nameKey);
+  });
+
+  it('ловит неизвестное здание, провинцию и рабочую силу больше населения', () => {
+    const bad = structuredClone(scenario);
+    bad.firms.push({ building: 'warehouse', province: 'nowhere', count: 1 });
+    bad.provinces[0]!.laborForce = bad.provinces[0]!.population + 1;
+    const issues = scenarioIssues(bad).join('\n');
+    expect(issues).toMatch(/"warehouse" не производственное здание/);
+    expect(issues).toMatch(/неизвестная провинция "nowhere"/);
+    expect(issues).toMatch(/рабочая сила больше населения/);
   });
 });
