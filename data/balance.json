@@ -10,6 +10,7 @@
     "markupAdjustSpeed": 0.1,
     "priceStickiness": 0.4,
     "expectedInflationPassThrough": 0.5,
+    "lossOutputCut": 3.0,
     "cashBufferTurns": 2,
     "dividendPayoutShare": 1.0,
     "closeAfterLossTurns": 6
@@ -41,12 +42,16 @@
   },
   "labor": {
     "naturalUnemployment": 0.05,
-    "wageAdjustSpeed": 0.2
+    "wageAdjustSpeed": 0.2,
+    "maxMonthlyWageCut": 0.01
   },
   "credit": {
     "loanSpread": 0.03,
+    "maxDebtToMonthlySales": 3,
     "expansionRoiMargin": 0.02,
+    "entryShortageThreshold": 0.05,
     "entryShortageTurns": 3,
+    "entryMinUtilization": 0.9,
     "entryMinMarkup": 0.15
   },
   "expectations": {
@@ -102,5 +107,8 @@
       "first": 1,
       "full": 3
     }
+  },
+  "government": {
+    "debtRatePremium": 0.5
   }
 }

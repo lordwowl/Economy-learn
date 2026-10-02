@@ -16,6 +16,10 @@ export interface Firm {
   /** Запасы: выход и входы. */
   inventory: Record<GoodId, number>;
   cash: number;
+  /** Долг банку. */
+  debt: number;
+  /** Строится: мощность появится, когда созреет отложенный эффект firmReady. */
+  underConstruction: boolean;
   /** Цена выхода, назначенная на этот ход. */
   price: number;
   /** Разложение цены: input.<товар>, wage, markup, expectations. Σ = price. */
@@ -50,6 +54,8 @@ export interface ProvinceMarket {
   breakdown: Breakdown;
   /** P_ref провинции: стартовая цена, опорная для спроса. */
   referencePrice: number;
+  /** Сколько ходов подряд в провинции устойчивый дефицит товара (для входа новых фирм). */
+  shortageTurns: number;
 }
 
 export interface MarketGood {
@@ -79,21 +85,76 @@ export interface Logistics {
   workHistory: number[];
   lastWork: number;
   lastLabor: number;
-  /** Заявки на перевозку за прошлый ход по дорогам, отдельно для рынка входов и потребительского. */
+  /** Заявки на перевозку за прошлый ход по участкам (дорога + направление), отдельно для рынка входов и потребительского. */
   requested: Record<TradePhase, Record<string, number>>;
 }
 
 export type TradePhase = 'inputs' | 'consumer';
 
-export interface RouteMetrics {
-  /** Провезено за ход (в обе стороны). */
+export interface DirectionMetrics {
+  from: string;
+  to: string;
+  /** Провезено за ход в этом направлении. */
   flow: number;
-  capacity: number;
-  /** Не провезено из-за этой дороги — «очередь» узкого места. */
+  /** Не провезено из-за этой дороги в этом направлении — «очередь» узкого места. */
   blocked: number;
 }
 
-export type PendingEffect = { type: 'demandRate'; delta: number } | { type: 'roadLane'; route: string };
+export interface RouteMetrics {
+  /** Пропускная способность в каждую сторону. */
+  capacity: number;
+  /** [a → b, b → a]. */
+  directions: [DirectionMetrics, DirectionMetrics];
+}
+
+export type TaxKind = 'sales' | 'profit' | 'income';
+
+export interface Government {
+  /** Деньги на счёте. В конце хода дефицит закрывается займом, профицит гасит долг. */
+  cash: number;
+  debt: number;
+  taxes: Record<TaxKind, number>;
+  transfersPerCapita: number;
+  /** Действующая субсидия производителю за единицу проданного товара (догоняет объявленную с лагом). */
+  subsidies: Record<GoodId, number>;
+  /** Объявленная игроком субсидия. */
+  announcedSubsidies: Record<GoodId, number>;
+  /** Потолки цен по товарам (на все продажи производителей, во всех провинциях). */
+  priceCeilings: Record<GoodId, number>;
+  /** Доходы за прошлый ход по статьям: tax.sales, tax.profit, tax.income, stateFirms. */
+  revenue: Breakdown;
+  /** Расходы за прошлый ход по статьям: transfers, construction, interest, subsidies. */
+  spending: Breakdown;
+}
+
+/** Банк: выдаёт кредиты (кредит создаёт деньги, погашение — уничтожает), проценты отдаёт владельцам-населению. */
+export interface Bank {
+  cash: number;
+  /** Списанные безнадёжные долги, накопленно: учитываются в инварианте денег. */
+  writtenOff: number;
+}
+
+export interface Storage {
+  id: string;
+  building: string;
+  province: string;
+  /** Достроен. */
+  ready: boolean;
+}
+
+/** Госрезерв (GDD 3, 5.11): склады и запасы по провинциям. */
+export interface Reserve {
+  storages: Storage[];
+  stock: Record<string, Record<GoodId, number>>;
+}
+
+export type PendingEffect =
+  | { type: 'demandRate'; delta: number }
+  | { type: 'creditRate'; delta: number }
+  | { type: 'subsidy'; good: GoodId; delta: number }
+  | { type: 'roadLane'; route: string }
+  | { type: 'firmReady'; firm: string; capacity: number }
+  | { type: 'storageReady'; storage: string };
 
 export interface Metrics {
   cpi: number;
@@ -114,6 +175,16 @@ export interface Metrics {
   routes: Record<string, RouteMetrics>;
   /** Работа перевозчика за ход: груз × длина. */
   logisticsWork: number;
+  /** ВВП за ход: Σ добавленной стоимости фирм и перевозчика. */
+  gdp: number;
+  /** Сальдо бюджета за ход: доходы − расходы. */
+  budgetBalance: number;
+  /** Чёрный рынок за ход: продано и средняя цена (только для товаров с потолком). */
+  blackMarket: Record<GoodId, { quantity: number; price: number }>;
+  /** Фирмы, о стройке которых решили в этот ход. */
+  firmsOpened: string[];
+  /** Фирмы, закрывшиеся в этот ход. */
+  firmsClosed: string[];
 }
 
 export interface WorldState {
@@ -124,12 +195,16 @@ export interface WorldState {
   keyRate: number;
   /** Ставка, на которую уже отреагировали домохозяйства (догоняет keyRate с лагом). */
   demandRate: number;
+  /** Ключевая ставка, уже дошедшая до кредитов (догоняет keyRate с лагом keyRateToCredit). */
+  creditRate: number;
   provinces: Province[];
   routes: Route[];
   logistics: Logistics;
   firms: Firm[];
   market: Record<GoodId, MarketGood>;
-  government: { cash: number };
+  government: Government;
+  bank: Bank;
+  reserve: Reserve;
   expectations: {
     /** π_a, месячная. */
     adaptive: number;
@@ -144,4 +219,15 @@ export interface WorldState {
   metrics: Metrics;
 }
 
-export type Action = { type: 'setKeyRate'; rate: number } | { type: 'addRoadLane'; route: string };
+export type Action =
+  | { type: 'setKeyRate'; rate: number }
+  | { type: 'addRoadLane'; route: string }
+  | { type: 'setTax'; tax: TaxKind; rate: number }
+  | { type: 'setTransfers'; perCapita: number }
+  | { type: 'setSubsidy'; good: GoodId; perUnit: number }
+  | { type: 'setPriceCeiling'; good: GoodId; price: number | null }
+  | { type: 'buildStorage'; building: string; province: string }
+  /** Закупка в резерв на рынке провинции в этом ходу. */
+  | { type: 'reserveBuy'; good: GoodId; province: string; quantity: number }
+  /** Интервенция: продажа из резерва на рынке провинции в этом ходу. */
+  | { type: 'reserveRelease'; good: GoodId; province: string; quantity: number };

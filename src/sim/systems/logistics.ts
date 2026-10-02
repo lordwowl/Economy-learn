@@ -8,12 +8,16 @@ export interface Path {
   to: string;
   /** Суммарная длина рёбер. */
   length: number;
-  /** id дорог по порядку. */
+  /** Участки пути по порядку: дорога + направление (legKey). */
   edges: string[];
 }
 
 export const pairKey = (from: string, to: string) => `${from}>${to}`;
 
+/** Участок: дорога в одном направлении. Пропускная способность считается для каждого направления отдельно. */
+export const legKey = (route: string, to: string) => `${route}:${to}`;
+
+/** Пропускная способность дороги в каждую сторону за ход. */
 export function routeCapacity(route: Route, capacityPerLane: number): number {
   return route.lanes * capacityPerLane;
 }
@@ -31,7 +35,7 @@ export function shortestPaths(provinces: readonly string[], routes: readonly Rou
       const key = pairKey(from, to);
       if ((dist.get(key) ?? Infinity) > route.length) {
         dist.set(key, route.length);
-        via.set(key, { next: to, edges: [route.id] });
+        via.set(key, { next: to, edges: [legKey(route.id, to)] });
       }
     }
   }
@@ -84,12 +88,12 @@ export interface Shipment {
   quantity: number;
   /** Сколько не влезло в дороги (очередь узкого места). */
   blockedByRoad: number;
-  /** Дороги, которые ограничили эту перевозку. */
+  /** Участки (legKey), которые ограничили эту перевозку. */
   bottlenecks: string[];
 }
 
 export interface ShipmentLimits {
-  /** Сколько пропускной способности дорог доступно этим перевозкам. */
+  /** Сколько пропускной способности участков (legKey) доступно этим перевозкам. */
   capacityLeft: Record<string, number>;
   fuel: number;
   labor: number;

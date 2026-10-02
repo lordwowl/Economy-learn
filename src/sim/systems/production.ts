@@ -2,7 +2,7 @@
 
 import type { Balance, Recipe } from '../../data/schemas';
 import type { Firm, GoodId } from '../state';
-import { mean } from '../units';
+import { clamp, mean } from '../units';
 
 /** Покрытие = запас / средние заказы, ограничено сверху coverageCap. */
 export function coverage(stock: number, averageOrders: number, firms: Balance['firms']): number {
@@ -42,4 +42,13 @@ export function feasibleRuns(firm: Firm, recipe: Recipe, planned: number, wage: 
   const wagePerRun = recipe.labor * wage;
   if (wagePerRun > 0) runs = Math.min(runs, firm.cash / wagePerRun);
   return Math.max(0, runs);
+}
+
+/**
+ * Реакция на убыток: если чистая выручка за единицу (цена после налога + субсидия) ниже себестоимости,
+ * выпуск урезается: × (1 − lossOutputCut × (себестоимость − выручка) / себестоимость).
+ */
+export function lossOutputFactor(netPrice: number, unitCost: number, firms: Balance['firms']): number {
+  if (unitCost <= 0 || netPrice >= unitCost) return 1;
+  return clamp(1 - (firms.lossOutputCut * (unitCost - netPrice)) / unitCost, 0, 1);
 }

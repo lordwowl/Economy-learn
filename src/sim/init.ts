@@ -11,6 +11,7 @@ import type { Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, Rou
 import { spendingShare } from './systems/demand';
 import {
   laborPerUnit,
+  legKey,
   planShipments,
   routeCapacity,
   shortestPaths,
@@ -72,6 +73,8 @@ function createFirms(data: GameData, scenario: Scenario): { firms: Firm[]; recip
         capacity,
         inventory: {},
         cash: 0,
+        debt: 0,
+        underConstruction: false,
         price: 0,
         breakdown: {},
         markup: data.balance.firms.initialMarkup,
@@ -103,6 +106,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const wage = scenario.wage;
   const m0 = balance.firms.initialMarkup;
   const cfg = balance.logistics;
+  const salesTax = scenario.taxes.sales;
   const { firms, recipeByGood } = createFirms(data, scenario);
   const provinceIds = scenario.provinces.map((p) => p.id);
   const population = scenario.provinces.reduce((sum, p) => sum + p.population, 0);
@@ -134,7 +138,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     }
 
     const capacityLeft: Record<string, number> = {};
-    for (const r of routes) capacityLeft[r.id] = routeCapacity(r, capacityPerLane);
+    for (const r of routes) for (const to of [r.a, r.b]) capacityLeft[legKey(r.id, to)] = routeCapacity(r, capacityPerLane);
     const balances: GoodBalance[] = [];
     /** Доля домохозяйств в спросе провинции на товар — чтобы разделить заявки на перевозку по фазам. */
     const householdShare: Record<GoodId, Record<string, number>> = {};
@@ -200,7 +204,11 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       const cost = unitCostBreakdown(recipe, inputs, wage);
       let c = 0;
       for (const v of Object.values(cost)) c += v;
-      producerPrice[good][p] = { price: c * (1 + m0), breakdown: { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.expectations]: 0 } };
+      const price = (c * (1 + m0)) / (1 - salesTax);
+      producerPrice[good][p] = {
+        price,
+        breakdown: { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.salesTax]: salesTax * price, [COMPONENT.expectations]: 0 },
+      };
     }
     // Средняя цена производителей (взвешена по выпуску) — для провинций без сделок и для тарифа.
     const average: Breakdown = {};
@@ -249,13 +257,15 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     const provinces: MarketGood['provinces'] = {};
     for (const p of provinceIds) {
       const pm = marketPrice[good]![p]!;
-      provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price };
+      provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price, shortageTurns: 0 };
     }
     market[good] = { price, breakdown: national, referencePrice: price, provinces };
   }
 
-  // 4. Фирмы.
+  // 4. Фирмы. Попутно — стартовые доходы бюджета (для сбалансированных трансфертов) и ВВП.
   let laborDemand = plan.logisticsLabor;
+  let revenue = 0;
+  let gdp = 0;
   for (const firm of firms) {
     const recipe = recipeFor(firm);
     const good = recipe.output.good;
@@ -264,6 +274,13 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     const prices: Record<GoodId, number> = {};
     for (const g of order) prices[g] = marketPrice[g]![firm.province]!.price;
     laborDemand += runs * recipe.labor;
+    const sales = orders * producerPrice[good]![firm.province]!.price;
+    let inputs = 0;
+    for (const input of recipe.inputs) inputs += runs * input.amount * (prices[input.good] ?? 0);
+    const profit = sales * (1 - salesTax) - inputs - runs * recipe.labor * wage;
+    const profitTax = Math.max(0, profit) * scenario.taxes.profit;
+    revenue += sales * salesTax + profitTax + (firm.owner === 'state' ? profit - profitTax : 0);
+    gdp += sales - inputs;
     firm.ordersHistory = Array.from({ length: balance.firms.salesAverageTurns }, () => orders);
     firm.inventory = { [good]: balance.firms.targetCoverage * orders };
     firm.cash = balance.firms.cashBufferTurns * runs * costPerRun(recipe, prices, wage);
@@ -273,6 +290,9 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     firm.lastRuns = runs;
     firm.lastSales = orders;
   }
+
+  for (const list of Object.values(plan.shipments)) for (const sh of list) gdp += sh.quantity * tariffOf(sh.path);
+  gdp -= plan.work * cfg.fuelPerUnitLength * fuelPrice;
 
   const logistics: Logistics = {
     cash: balance.firms.cashBufferTurns * (plan.work * cfg.fuelPerUnitLength * fuelPrice + plan.logisticsLabor * wage),
@@ -288,12 +308,14 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   if (s <= 0) throw new Error('при стартовой ставке домохозяйства ничего не тратят');
   const laborForce = scenario.provinces.reduce((sum, p) => sum + p.laborForce, 0);
   const employment = Math.min(laborDemand, laborForce);
+  revenue += employment * wage * scenario.taxes.income;
+  const transfersPerCapita = scenario.transfersPerCapita === 'balanced' ? revenue / population : scenario.transfersPerCapita;
   const provinces: Province[] = scenario.provinces.map((p) => {
     let perCapita = 0;
     for (const [good, params] of Object.entries(balance.demand.goods)) {
       perCapita += marketPrice[good]![p.id]!.price * params.basePerCapita;
     }
-    const wageIncome = (employment * wage * p.laborForce) / laborForce;
+    const wageIncome = (employment * wage * (1 - scenario.taxes.income) * p.laborForce) / laborForce;
     return {
       id: p.id,
       nameKey: p.nameKey,
@@ -307,9 +329,13 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   });
 
   const routeMetrics: Record<string, RouteMetrics> = {};
-  for (const r of routes) routeMetrics[r.id] = { flow: 0, capacity: routeCapacity(r, capacityPerLane), blocked: 0 };
+  const legFlow: Record<string, number> = {};
   for (const list of Object.values(plan.shipments)) {
-    for (const sh of list) for (const e of sh.path.edges) routeMetrics[e]!.flow += sh.quantity;
+    for (const sh of list) for (const e of sh.path.edges) legFlow[e] = (legFlow[e] ?? 0) + sh.quantity;
+  }
+  for (const r of routes) {
+    const direction = (from: string, to: string) => ({ from, to, flow: legFlow[legKey(r.id, to)] ?? 0, blocked: 0 });
+    routeMetrics[r.id] = { capacity: routeCapacity(r, capacityPerLane), directions: [direction(r.a, r.b), direction(r.b, r.a)] };
   }
 
   const monthlyTarget = annualToMonthly(balance.expectations.inflationTarget);
@@ -332,6 +358,11 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     provinceShortage: Object.fromEntries(provinceIds.map((p) => [p, zeroByGood()])),
     routes: routeMetrics,
     logisticsWork: plan.work,
+    gdp,
+    budgetBalance: 0,
+    blackMarket: {},
+    firmsOpened: [],
+    firmsClosed: [],
   };
 
   return {
@@ -339,12 +370,32 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     wage,
     keyRate: scenario.keyRate,
     demandRate: scenario.keyRate,
+    creditRate: scenario.keyRate,
     provinces,
     routes,
     logistics,
     firms,
     market,
-    government: { cash: 0 },
+    government: {
+      cash: 0,
+      debt: 0,
+      taxes: { ...scenario.taxes },
+      transfersPerCapita,
+      subsidies: {},
+      announcedSubsidies: {},
+      priceCeilings: {},
+      revenue: {},
+      spending: {},
+    },
+    bank: { cash: 0, writtenOff: 0 },
+    reserve: {
+      storages: scenario.reserve.storages.map((s, i) => ({ id: `${s.building}-${s.province}-${i + 1}`, building: s.building, province: s.province, ready: true })),
+      stock: scenario.reserve.stock.reduce<Record<string, Record<GoodId, number>>>((acc, item) => {
+        const byGood = (acc[item.province] ??= {});
+        byGood[item.good] = (byGood[item.good] ?? 0) + item.quantity;
+        return acc;
+      }, {}),
+    },
     expectations: { adaptive: monthlyTarget, expected: monthlyTarget, trust: scenario.trust },
     pending: emptyQueue(),
     cpiHistory: [100],

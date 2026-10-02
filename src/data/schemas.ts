@@ -128,6 +128,8 @@ export const balanceSchema = z.strictObject({
       priceStickiness: share,
       /** γ — доля ожидаемой инфляции, закладываемая в цену. */
       expectedInflationPassThrough: share,
+      /** Если чистая выручка за единицу ниже себестоимости, выпуск × (1 − lossOutputCut × доля убытка). */
+      lossOutputCut: nonNegative,
       /** Сколько месяцев издержек фирма держит на счёте; остальное — дивиденды. */
       cashBufferTurns: nonNegative,
       /** Доля избытка денег сверх буфера, выплачиваемая владельцам за ход. */
@@ -154,14 +156,22 @@ export const balanceSchema = z.strictObject({
     naturalUnemployment: share,
     /** φ. */
     wageAdjustSpeed: nonNegative,
+    /** Номинальная зарплата падает не быстрее этой доли в месяц (зарплаты «липкие» вниз). */
+    maxMonthlyWageCut: share,
   }),
   credit: z.strictObject({
     /** Спред: ставка_кредита = ключевая + спред. */
     loanSpread: nonNegative,
+    /** Лимит долга фирмы в месяцах ожидаемых продаж. */
+    maxDebtToMonthlySales: nonNegative,
     /** Порог: фирма расширяется, если ROI > ставка_кредита + порог. */
     expansionRoiMargin: nonNegative,
+    /** Дефицит (доля неудовлетворённого спроса в провинции), который считается устойчивым. */
+    entryShortageThreshold: share,
     /** Сколько ходов подряд нужен дефицит для входа новой фирмы. */
     entryShortageTurns: turns,
+    /** Новая фирма входит, только если существующие производители загружены не меньше этого (дефицит из-за мощностей, а не входов). */
+    entryMinUtilization: share,
     /** Минимальная наценка для входа новой фирмы. */
     entryMinMarkup: z.number().finite(),
   }),
@@ -199,6 +209,10 @@ export const balanceSchema = z.strictObject({
   cpiWeights: z
     .record(id, positive)
     .refine((w) => Object.keys(w).length > 0, 'cpiWeights: нужен хотя бы один товар'),
+  government: z.strictObject({
+    /** Премия к ставке госдолга (годовая) за каждую единицу отношения долг / годовой ВВП. */
+    debtRatePremium: nonNegative,
+  }),
   /** Задержки решений, ходов (GDD 5.12). Задержки строек — в buildings.json. */
   lags: z.strictObject({
     keyRateToCredit: lagSchema,
@@ -221,6 +235,14 @@ export const scenarioSchema = z.strictObject({
   keyRate: z.number().finite(),
   /** Доверие к ЦБ C ∈ [0, 1] (GDD 5.9). */
   trust: share,
+  /** Ставки налогов (GDD 5.11): с продаж, на прибыль, на доходы. */
+  taxes: z.strictObject({
+    sales: z.number().min(0).lt(1),
+    profit: share,
+    income: share,
+  }),
+  /** Трансферты населению на душу в месяц; "balanced" — столько, чтобы стартовый бюджет был сбалансирован. */
+  transfersPerCapita: z.union([nonNegative, z.literal('balanced')]),
   provinces: z
     .array(
       z.strictObject({
@@ -238,6 +260,11 @@ export const scenarioSchema = z.strictObject({
       count: z.number().int().positive(),
     }),
   ),
+  /** Госрезерв на старте: склады и запасы в них. */
+  reserve: z.strictObject({
+    storages: z.array(z.strictObject({ building: id, province: id })),
+    stock: z.array(z.strictObject({ province: id, good: id, quantity: positive })),
+  }),
   /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
   routes: z.array(
     z.strictObject({

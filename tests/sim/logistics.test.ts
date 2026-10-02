@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getGameData } from '../../src/data';
 import { sumBreakdown } from '../../src/sim/causes';
 import type { Route } from '../../src/sim/state';
-import { fuelPerUnit, pairKey, planShipments, shortestPaths, tariff } from '../../src/sim/systems/logistics';
+import { fuelPerUnit, legKey, pairKey, planShipments, shortestPaths, tariff } from '../../src/sim/systems/logistics';
 import { run, totalMoney, type ScenarioPatch } from './helpers';
 
 const { balance } = getGameData();
@@ -18,12 +18,12 @@ describe('кратчайшие пути', () => {
   it('идут через промежуточную провинцию, если так короче', () => {
     const p = shortestPaths(provinces, routes).get(pairKey('a', 'c'))!;
     expect(p.length).toBe(6);
-    expect(p.edges).toEqual(['ab', 'bc']);
+    expect(p.edges).toEqual([legKey('ab', 'b'), legKey('bc', 'c')]);
   });
 
   it('дорога без полос непроезжая', () => {
     const closed = routes.map((r) => (r.id === 'bc' ? { ...r, lanes: 0 } : r));
-    expect(shortestPaths(provinces, closed).get(pairKey('a', 'c'))!.edges).toEqual(['ac']);
+    expect(shortestPaths(provinces, closed).get(pairKey('a', 'c'))!.edges).toEqual([legKey('ac', 'c')]);
     expect(shortestPaths(provinces, [{ ...routes[0]!, lanes: 0 }]).has(pairKey('a', 'b'))).toBe(false);
   });
 });
@@ -43,11 +43,25 @@ describe('тариф (GDD 5.2)', () => {
 
 describe('планирование перевозок', () => {
   const paths = shortestPaths(provinces, routes);
-  const unlimited = { capacityLeft: { ab: 1e9, bc: 1e9, ac: 1e9 }, fuel: 1e9, labor: 1e9 };
+  const legs = Object.fromEntries(routes.flatMap((r) => [legKey(r.id, r.a), legKey(r.id, r.b)]).map((k) => [k, 1e9]));
+  const unlimited = { capacityLeft: legs, fuel: 1e9, labor: 1e9 };
 
   it('не больше остатков продавцов', () => {
     const s = planShipments([{ good: 'g', deficits: { c: 100 }, stocks: { a: 30 } }], paths, unlimited, cfg);
     expect(s.reduce((x, y) => x + y.quantity, 0)).toBeCloseTo(30, 9);
+  });
+
+  it('встречное направление не занимает пропускную способность', () => {
+    const s = planShipments(
+      [
+        { good: 'g', deficits: { b: 200 }, stocks: { a: 200 } },
+        { good: 'h', deficits: { a: 200 }, stocks: { b: 200 } },
+      ],
+      paths,
+      { ...unlimited, capacityLeft: { ...legs, [legKey('ab', 'b')]: 200, [legKey('ab', 'a')]: 200 } },
+      cfg,
+    );
+    for (const x of s) expect(x.quantity).toBeCloseTo(200, 9);
   });
 
   it('не больше пропускной способности дороги, все товары урезаются одинаково', () => {
@@ -57,14 +71,14 @@ describe('планирование перевозок', () => {
         { good: 'h', deficits: { b: 300 }, stocks: { a: 300 } },
       ],
       paths,
-      { ...unlimited, capacityLeft: { ab: 200, bc: 1e9, ac: 1e9 } },
+      { ...unlimited, capacityLeft: { ...legs, [legKey('ab', 'b')]: 200 } },
       cfg,
     );
     const g = s.find((x) => x.good === 'g')!;
     const h = s.find((x) => x.good === 'h')!;
     expect(g.quantity + h.quantity).toBeCloseTo(200, 9);
     expect(g.quantity / g.requested).toBeCloseTo(h.quantity / h.requested, 12);
-    expect(g.bottlenecks).toEqual(['ab']);
+    expect(g.bottlenecks).toEqual([legKey('ab', 'b')]);
     expect(g.blockedByRoad + h.blockedByRoad).toBeCloseTo(200, 9);
   });
 
@@ -84,14 +98,16 @@ describe('логистика в ходе симуляции', () => {
   const lanes = (n: number): ScenarioPatch => (sc) => {
     sc.routes.find((r) => r.id === 'centerSouth')!.lanes = n;
   };
-  const jammed = run(TURNS, () => [], undefined, lanes(2));
+  const jammed = run(TURNS, () => [], undefined, lanes(1));
   const BUILD_TURN = 3;
-  const built = run(TURNS, (t) => (t === BUILD_TURN ? [{ type: 'addRoadLane', route: 'centerSouth' }] : []), undefined, lanes(2));
+  const built = run(TURNS, (t) => (t === BUILD_TURN ? [{ type: 'addRoadLane', route: 'centerSouth' }] : []), undefined, lanes(1));
 
   it('поток по дороге ≤ её пропускной способности', () => {
     for (const r of [passive, jammed, built]) {
       for (const s of r.states.slice(1)) {
-        for (const m of Object.values(s.metrics.routes)) expect(m.flow).toBeLessThanOrEqual(m.capacity + 1e-6);
+        for (const m of Object.values(s.metrics.routes)) {
+          for (const d of m.directions) expect(d.flow).toBeLessThanOrEqual(m.capacity + 1e-6);
+        }
       }
     }
   });
@@ -120,9 +136,10 @@ describe('логистика в ходе симуляции', () => {
     expect(fuel.provinces.north!.breakdown.logistics ?? 0).toBeGreaterThan(0);
   });
 
-  it('узкое место: при двух полосах дорога забита, на юге дефицит топлива', () => {
+  it('узкое место: при одной полосе дорога на юг забита, на юге дефицит топлива', () => {
     const t = 3;
-    expect(jammed.states[t]!.metrics.routes.centerSouth!.blocked).toBeGreaterThan(0);
+    const toSouth = jammed.states[t]!.metrics.routes.centerSouth!.directions.find((d) => d.to === 'south')!;
+    expect(toSouth.blocked).toBeGreaterThan(0);
     expect(jammed.states[t]!.metrics.provinceShortage.south!.fuel).toBeGreaterThan(0.1);
     expect(passive.states[t]!.metrics.provinceShortage.south!.fuel).toBeLessThan(0.05);
   });
@@ -130,8 +147,8 @@ describe('логистика в ходе симуляции', () => {
   it('стройка полосы: готова через 3 хода, после этого дефицит на юге ниже, чем без стройки', () => {
     const lane = getGameData().buildings.find((b) => b.kind === 'route')!;
     const ready = BUILD_TURN + lane.buildTurns;
-    expect(built.states[ready - 1]!.routes.find((r) => r.id === 'centerSouth')!.lanes).toBe(2);
-    expect(built.states[ready]!.routes.find((r) => r.id === 'centerSouth')!.lanes).toBe(3);
+    expect(built.states[ready - 1]!.routes.find((r) => r.id === 'centerSouth')!.lanes).toBe(1);
+    expect(built.states[ready]!.routes.find((r) => r.id === 'centerSouth')!.lanes).toBe(2);
     const later = ready + 4;
     expect(built.states[later]!.metrics.provinceShortage.south!.fuel).toBeLessThan(
       jammed.states[later]!.metrics.provinceShortage.south!.fuel!,
