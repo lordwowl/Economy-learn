@@ -90,6 +90,12 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'storageReady', storage: id });
       break;
     }
+    case 'shock': {
+      const shock = data.shocks.find((s) => s.id === action.shock);
+      if (!shock) throw new Error(`нет шока "${action.shock}"`);
+      state.activeShocks.push({ id: shock.id, until: turn + shock.turns - 1 });
+      break;
+    }
     case 'buildStateFleet': {
       const fleet = data.buildings.find((b) => b.kind === 'fleet');
       if (fleet?.kind !== 'fleet') throw new Error('в данных нет автопарка');
@@ -151,6 +157,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     p.households.income = 0;
   }
   for (const action of actions) applyAction(state, action, turn, data);
+  state.activeShocks = state.activeShocks.filter((s) => s.until >= turn);
   const { due, queue } = takeDue(state.pending, turn);
   state.pending = queue;
   for (const effect of due) {
@@ -185,7 +192,20 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     return prices;
   };
 
-  // 2. Планы; не хватает денег на выгодный план — оборотный кредит.
+  /** Модификатор шока (GDD 5.3): произведение множителей мощности действующих шоков для здания фирмы. */
+  const shockMultiplier = (firm: Firm): number => {
+    let m = 1;
+    for (const active of state.activeShocks) {
+      for (const effect of data.shocks.find((s) => s.id === active.id)?.effects ?? []) {
+        if (effect.building === firm.building && (effect.province === undefined || effect.province === firm.province)) {
+          m *= effect.multiplier;
+        }
+      }
+    }
+    return m;
+  };
+
+  // 2. Планы; не хватает денег на выгодный план — оборотный кредит.  Шок урезает доступную мощность.
   const plan = new Map<string, number>();
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
@@ -193,7 +213,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const unitCost = costPerRun(recipe, prices, state.wage) / recipe.output.amount;
     const netPrice =
       firm.price * (1 - state.government.taxes.sales) + (state.government.subsidies[recipe.output.good] ?? 0);
-    const planned = plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms);
+    const planned = Math.min(
+      plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms),
+      firm.capacity * shockMultiplier(firm),
+    );
     if (planned > affordableRuns(firm, recipe, prices, state.wage)) {
       borrowForPlan(firm, recipe, planned, prices, state.wage, state.government.taxes.sales, balance.credit);
     }
@@ -602,6 +625,25 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     firm.price = sumBreakdown(breakdown);
   }
 
+  // 7b'. ИЦП: цена производителей товара — средняя цена фирм, взвешенная по выпуску (без выпуска — по мощности).
+  //       ИЦП = 100 × Σ w·Pp / Σ w·Pp_ref; вклад товара = 100 × w × ΔPp / Σ w·Pp_ref.
+  let ppiBase = 0;
+  const ppiContributions: Breakdown = {};
+  for (const [good, m] of Object.entries(state.market)) {
+    ppiBase += m.ppiWeight * m.producerReferencePrice;
+    const producers = state.firms.filter((f) => outputOf(f) === good);
+    const byOutput = producers.reduce((s, f) => s + f.lastRuns, 0);
+    const weight = (f: Firm) => (byOutput > 0 ? f.lastRuns : f.capacity);
+    const total = producers.reduce((s, f) => s + weight(f), 0);
+    if (total <= 0) continue;
+    const before = m.producerPrice;
+    m.producerPrice = producers.reduce((s, f) => s + weight(f) * f.price, 0) / total;
+    ppiContributions[`producerPrice.${good}`] = m.ppiWeight * (m.producerPrice - before);
+  }
+  for (const ref of Object.keys(ppiContributions)) ppiContributions[ref] = ppiBase > 0 ? (100 * ppiContributions[ref]!) / ppiBase : 0;
+  const ppiEvent = makeCauseEvent(turn, 'ppi', ppiContributions);
+  causes.push(ppiEvent);
+
   // 7b. ИПЦ: 100 × Σ w·P / Σ w·P_ref. Вклад товара = 100 × w × ΔP / Σ w·P_ref.
   let base = 0;
   for (const [good, w] of Object.entries(balance.cpiWeights)) base += w * (state.market[good]?.referencePrice ?? 0);
@@ -645,6 +687,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
 
   state.metrics = {
     cpi,
+    ppi: prev.metrics.ppi + ppiEvent.delta,
     inflationMoM,
     inflationYoY: yearAgo !== undefined && yearAgo > 0 ? cpi / yearAgo - 1 : null,
     unemployment,

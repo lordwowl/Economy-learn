@@ -271,7 +271,25 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       const pm = marketPrice[good]![p]!;
       provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price, shortageTurns: 0 };
     }
-    market[good] = { price, breakdown: national, referencePrice: price, provinces };
+    // ИЦП: цена производителей и вес товара — по стартовому выпуску.
+    const recipe = recipeByGood.get(good)!;
+    let outputValue = 0;
+    let outputQty = 0;
+    for (const f of firms.filter((x) => x.recipe === recipe.id)) {
+      const q = (plan.runs.get(f.id) ?? 0) * recipe.output.amount;
+      outputQty += q;
+      outputValue += q * producerPrice[good]![f.province]!.price;
+    }
+    const producer = outputQty > 0 ? outputValue / outputQty : price;
+    market[good] = {
+      price,
+      breakdown: national,
+      referencePrice: price,
+      provinces,
+      producerPrice: producer,
+      producerReferencePrice: producer,
+      ppiWeight: outputValue,
+    };
   }
 
   // 4. Фирмы. Попутно — стартовые доходы бюджета (для сбалансированных трансфертов) и ВВП.
@@ -378,8 +396,12 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const zeroByGood = () => Object.fromEntries(order.map((g) => [g, 0]));
   let spending = 0;
   for (const p of provinces) spending += p.households.referenceSpendingPerCapita * p.households.population;
+  // Веса ИЦП — доли стартового выпуска по стоимости.
+  const totalOutputValue = Object.values(market).reduce((s, m) => s + m.ppiWeight, 0);
+  for (const m of Object.values(market)) m.ppiWeight = totalOutputValue > 0 ? m.ppiWeight / totalOutputValue : 0;
   const metrics: Metrics = {
     cpi: 100,
+    ppi: 100,
     inflationMoM: 0,
     inflationYoY: null,
     unemployment: 1 - employment / laborForce,
@@ -424,6 +446,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       spending: {},
     },
     bank: { cash: 0, writtenOff: 0 },
+    activeShocks: [],
     reserve: {
       storages: scenario.reserve.storages.map((s, i) => ({ id: `${s.building}-${s.province}-${i + 1}`, building: s.building, province: s.province, ready: true })),
       stock: scenario.reserve.stock.reduce<Record<string, Record<GoodId, number>>>((acc, item) => {

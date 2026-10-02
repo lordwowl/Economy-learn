@@ -1,0 +1,16 @@
+{
+  "shocks": [
+    {
+      "id": "harvestFailure",
+      "nameKey": "shock.harvestFailure",
+      "turns": 3,
+      "effects": [{ "type": "capacity", "building": "farm", "multiplier": 0.5 }]
+    },
+    {
+      "id": "refineryAccident",
+      "nameKey": "shock.refineryAccident",
+      "turns": 2,
+      "effects": [{ "type": "capacity", "building": "refinery", "multiplier": 0.4 }]
+    }
+  ]
+}

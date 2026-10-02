@@ -18,5 +18,7 @@
   "province.north": "Северная провинция",
   "province.center": "Центральная провинция",
   "province.south": "Южная провинция",
-  "building.truckFleet": "Автопарк"
+  "building.truckFleet": "Автопарк",
+  "shock.harvestFailure": "Неурожай",
+  "shock.refineryAccident": "Авария на НПЗ"
 }

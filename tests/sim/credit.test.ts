@@ -114,16 +114,17 @@ describe('вход и выход фирм', () => {
     }
   });
 
-  it('не хватает мощностей пекарен на юге → в кредит строится новая пекарня, деньги − долги сохраняются', () => {
+  it('не хватает мощностей пекарен → в кредит строится новая пекарня, деньги − долги сохраняются', () => {
+    // Пекарни остаются только на севере: мощностей на страну не хватает.
     const r = run(24, () => [], undefined, (sc) => {
-      sc.firms.find((f) => f.building === 'bakery' && f.province === 'south')!.count = 1;
+      sc.firms = sc.firms.filter((f) => f.building !== 'bakery' || f.province === 'north');
     });
     const opened = r.states.flatMap((s) => s.metrics.firmsOpened);
-    expect(opened.some((id) => id.startsWith('bakery-south'))).toBe(true);
+    expect(opened.some((id) => id.startsWith('bakery-'))).toBe(true);
     const start = totalMoney(r.states[0]!);
     for (const s of r.states) expect(totalMoney(s)).toBeCloseTo(start, 6);
 
-    const id = opened.find((x) => x.startsWith('bakery-south'))!;
+    const id = opened.find((x) => x.startsWith('bakery-'))!;
     const turn = r.states.findIndex((s) => s.metrics.firmsOpened.includes(id));
     const lane = data.buildings.find((b) => b.id === 'bakery');
     if (lane?.kind !== 'producer') throw new Error('нет пекарни');

@@ -72,6 +72,18 @@ export interface MarketGood {
   /** Стартовая средняя цена — база ИПЦ. */
   referencePrice: number;
   provinces: Record<string, ProvinceMarket>;
+  /** Цена производителей: средняя цена фирм, взвешенная по выпуску (для ИЦП). */
+  producerPrice: number;
+  /** Стартовая цена производителей — база ИЦП. */
+  producerReferencePrice: number;
+  /** Вес товара в ИЦП: доля в стартовом выпуске по стоимости. */
+  ppiWeight: number;
+}
+
+export interface ActiveShock {
+  id: string;
+  /** Последний ход действия. */
+  until: number;
 }
 
 export interface Route {
@@ -182,6 +194,8 @@ export type PendingEffect =
 
 export interface Metrics {
   cpi: number;
+  /** Индекс цен производителей (GDD 5.13), старт = 100. */
+  ppi: number;
   inflationMoM: number;
   inflationYoY: number | null;
   unemployment: number;
@@ -229,6 +243,7 @@ export interface WorldState {
   government: Government;
   bank: Bank;
   reserve: Reserve;
+  activeShocks: ActiveShock[];
   expectations: {
     /** π_a, месячная. */
     adaptive: number;
@@ -251,6 +266,8 @@ export type Action =
   | { type: 'setSubsidy'; good: GoodId; perUnit: number }
   | { type: 'setPriceCeiling'; good: GoodId; price: number | null }
   | { type: 'buildStorage'; building: string; province: string }
+  /** Внешний шок из shocks.json (сценарий уровня или песочница). */
+  | { type: 'shock'; shock: string }
   /** +1 единица госпарка (из бюджета, через buildTurns). */
   | { type: 'buildStateFleet' }
   /** Закупка в резерв на рынке провинции в этом ходу. */

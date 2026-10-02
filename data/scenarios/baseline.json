@@ -32,7 +32,7 @@
     {
       "building": "farm",
       "province": "north",
-      "count": 4
+      "count": 5
     },
     {
       "building": "farm",
@@ -47,7 +47,7 @@
     {
       "building": "mill",
       "province": "center",
-      "count": 3
+      "count": 4
     },
     {
       "building": "mill",
@@ -57,7 +57,7 @@
     {
       "building": "bakery",
       "province": "north",
-      "count": 4
+      "count": 5
     },
     {
       "building": "bakery",
@@ -67,7 +67,7 @@
     {
       "building": "bakery",
       "province": "south",
-      "count": 4
+      "count": 5
     },
     {
       "building": "refinery",

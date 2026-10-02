@@ -99,6 +99,32 @@ export const buildingsFileSchema = z.strictObject({
   buildings: z.array(buildingSchema).min(1),
 });
 
+// ---------- shocks.json ----------
+// Шоки — нейтрально названные внешние события (GDD 2): неурожай, авария на НПЗ.
+
+export const shockSchema = z.strictObject({
+  id,
+  nameKey: i18nKey,
+  /** Сколько ходов действует, включая ход начала. */
+  turns,
+  effects: z
+    .array(
+      z.strictObject({
+        /** Мощность зданий × multiplier (модификатор шока, GDD 5.3). */
+        type: z.literal('capacity'),
+        building: id,
+        /** Только в этой провинции; без поля — по всей стране. */
+        province: id.optional(),
+        multiplier: z.number().min(0),
+      }),
+    )
+    .min(1),
+});
+
+export const shocksFileSchema = z.strictObject({
+  shocks: z.array(shockSchema),
+});
+
 // ---------- balance.json ----------
 // Ставки (ключевая, нейтральная, спред, цель по инфляции) — годовые доли: 0.06 = 6% годовых.
 
@@ -300,6 +326,7 @@ export const scenarioSchema = z.strictObject({
 
 export type Scenario = z.infer<typeof scenarioSchema>;
 export type Lag = z.infer<typeof lagSchema>;
+export type Shock = z.infer<typeof shockSchema>;
 export type Good = z.infer<typeof goodSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
 export type Building = z.infer<typeof buildingSchema>;
