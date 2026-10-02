@@ -325,5 +325,8 @@
   "scenario.chain": "Не хватает мельниц",
   "scenario.harvest": "Есть госрезерв зерна",
   "scenario.ceiling": "Потолок цены на хлеб",
-  "scenario.overheating": "Дешёвые деньги и перегрев"
+  "scenario.overheating": "Дешёвые деньги и перегрев",
+  "menu.continue": "Продолжить",
+  "menu.continueInfo": "{title}, месяц {turn}",
+  "menu.sandboxNamed": "Песочница: {scenario}"
 }

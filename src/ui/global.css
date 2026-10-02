@@ -948,3 +948,16 @@ button:focus-visible {
   height: 20px;
   accent-color: var(--accent);
 }
+
+.menu__continue {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.menu__button .stars,
+.menu__button .stars__empty {
+  color: inherit;
+}

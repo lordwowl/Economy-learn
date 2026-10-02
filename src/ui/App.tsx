@@ -1,10 +1,13 @@
 import { useState } from 'preact/hooks';
-import { getLevels, getScenarios, type Level } from '../data';
+import { getGameData, getLevels, getScenarios, type Level } from '../data';
+import { newSession, parseProgress, parseSave, restore, type GameMode, type SavedGame } from '../game/save';
+import type { Session } from '../game/session';
+import { readStored, writeStored } from '../game/storage';
 import { t, translate } from '../i18n';
 import { GameScreen } from './GameScreen';
-import { Briefing, levelTitle } from './LevelViews';
+import { Briefing, levelTitle, Stars } from './LevelViews';
 
-type Screen = { kind: 'menu' } | { kind: 'briefing'; level: Level } | { kind: 'sandbox' } | { kind: 'game'; level?: Level; scenario?: string; run: number };
+type Screen = { kind: 'menu' } | { kind: 'briefing'; level: Level } | { kind: 'sandbox' } | { kind: 'game'; mode: GameMode; session: Session; run: number };
 
 /** Облегчённая песочница (GDD 8): выбор стартовой экономики. */
 function SandboxSetup({ onStart, onBack }: { onStart: (scenario: string) => void; onBack: () => void }) {
@@ -34,40 +37,76 @@ function SandboxSetup({ onStart, onBack }: { onStart: (scenario: string) => void
   );
 }
 
+/** Песочница без кода сценария играет с этим seed. */
+const SANDBOX_SEED = 42;
+
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: 'menu' });
   const menu = () => setScreen({ kind: 'menu' });
+  const data = getGameData();
+  const start = (mode: GameMode, seed: number) => setScreen({ kind: 'game', mode, session: newSession(data, mode, seed, getLevels(), getScenarios()), run: 0 });
 
   if (screen.kind === 'briefing') {
-    return <Briefing level={screen.level} onBack={menu} onStart={() => setScreen({ kind: 'game', level: screen.level, run: 0 })} />;
+    const { level } = screen;
+    return <Briefing level={level} onBack={menu} onStart={() => start({ kind: 'level', level: level.id }, level.seed)} />;
   }
   if (screen.kind === 'sandbox') {
-    return <SandboxSetup onBack={menu} onStart={(scenario) => setScreen({ kind: 'game', scenario, run: 0 })} />;
+    return <SandboxSetup onBack={menu} onStart={(scenario) => start({ kind: 'sandbox', scenario }, SANDBOX_SEED)} />;
   }
   if (screen.kind === 'game') {
-    const { level, scenario, run } = screen;
+    const { mode, session, run } = screen;
     return (
       <GameScreen
         key={run}
-        {...(level ? { level } : {})}
-        {...(scenario ? { scenario } : {})}
+        mode={mode}
+        initial={session}
         onBack={menu}
-        onReplay={() => setScreen({ ...screen, run: run + 1 })}
+        onReplay={() => setScreen({ kind: 'game', mode, session: newSession(data, mode, session.seed, getLevels(), getScenarios()), run: run + 1 })}
       />
     );
   }
+
+  const saved = parseSave(readStored('save'));
+  const progress = parseProgress(readStored('progress'));
+  const savedTitle = (save: SavedGame) => {
+    const level = save.mode.kind === 'level' ? getLevels().find((l) => l.id === (save.mode as { level: string }).level) : undefined;
+    return level ? levelTitle(level) : t('menu.sandboxNamed', { scenario: translate(`scenario.${(save.mode as { scenario: string }).scenario}`) });
+  };
+  const resume = (save: SavedGame) => {
+    try {
+      setScreen({ kind: 'game', mode: save.mode, session: restore(save, data, getLevels(), getScenarios()), run: 0 });
+    } catch {
+      // Сохранение от старой версии (уровня или сценария больше нет) — просто забываем его.
+      writeStored('save', null);
+      menu();
+    }
+  };
 
   return (
     <main class="menu">
       <h1 class="menu__title">{t('app.title')}</h1>
       <p class="menu__subtitle">{t('app.subtitle')}</p>
+      {saved && (
+        <button type="button" class="menu__button menu__continue" onClick={() => resume(saved)}>
+          {t('menu.continue')}
+          <small>{t('menu.continueInfo', { title: savedTitle(saved), turn: saved.turns.length })}</small>
+        </button>
+      )}
       <h2 class="menu__section">{t('menu.campaign')}</h2>
       <ul class="menu__levels">
         {getLevels().map((level) => (
           <li key={level.id}>
             <button type="button" class="menu__button" onClick={() => setScreen({ kind: 'briefing', level })}>
               {levelTitle(level)}
-              <small>{t('menu.levelInfo', { turns: level.turns })}</small>
+              <small>
+                {t('menu.levelInfo', { turns: level.turns })}
+                {progress.stars[level.id] !== undefined && (
+                  <>
+                    {' · '}
+                    <Stars stars={progress.stars[level.id]!} />
+                  </>
+                )}
+              </small>
             </button>
           </li>
         ))}

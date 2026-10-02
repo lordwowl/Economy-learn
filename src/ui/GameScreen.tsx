@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'preact/hooks';
-import { getGameData, getScenario, type Level } from '../data';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { getGameData, getLevels, getScenario } from '../data';
 import { contextFromState, formatWhyLine, metricLabel, why } from '../game/explain';
-import { advanceLevel, evaluateLevel, isAllowed, startLevel } from '../game/level';
-import { addDecision, createSession, currentState, decisionKey, endTurn, fastForward, previousState, removeDecision, type Session } from '../game/session';
+import { advanceLevel, evaluateLevel, isAllowed } from '../game/level';
+import { parseProgress, toSave, withStars, type GameMode } from '../game/save';
+import { addDecision, currentState, decisionKey, endTurn, fastForward, previousState, removeDecision, type Session } from '../game/session';
+import { readStored, writeStored } from '../game/storage';
 import { monthSummary, type SummaryItem } from '../game/summary';
 import { t } from '../i18n';
 import type { Action, WorldState } from '../sim';
@@ -21,8 +23,6 @@ import { XrayView } from './XrayView';
 /** График, который открывается из «Почему?» у показателя верхней панели. */
 const TOP_CHART: Partial<Record<TopMetric, ChartMetric>> = { cpi: 'cpi', unemployment: 'unemployment', 'budget.balance': 'budgetBalance' };
 
-/** Песочница: seed без уровня. */
-const SEED = 42;
 const FAST_FORWARD_TURNS = 3;
 
 type Tab = 'policy' | 'build' | 'charts';
@@ -56,21 +56,32 @@ function isNoop(action: Action, state: WorldState): boolean {
 }
 
 interface Props {
-  /** Уровень кампании; без него — песочница (без целей и срока). */
-  level?: Level;
-  /** Сценарий песочницы (data/scenarios). */
-  scenario?: string;
+  /** Уровень кампании или песочница (без целей и срока). */
+  mode: GameMode;
+  /** Новая или восстановленная из сохранения сессия. */
+  initial: Session;
   onBack: () => void;
   onReplay: () => void;
 }
 
 /** Основной экран (GDD 7): верхняя панель, карта, панели «Строить»/«Политика», ход и сводка месяца. */
-export function GameScreen({ level, scenario: sandboxScenario = 'baseline', onBack, onReplay }: Props) {
+export function GameScreen({ mode, initial, onBack, onReplay }: Props) {
   const data = getGameData();
-  const scenario = getScenario(level?.scenario ?? sandboxScenario);
-  const [session, setSession] = useState<Session>(() => (level ? startLevel(data, level, scenario) : createSession(data, scenario, SEED)));
+  const level = mode.kind === 'level' ? getLevels().find((l) => l.id === mode.level) : undefined;
+  const scenario = getScenario(level?.scenario ?? (mode.kind === 'sandbox' ? mode.scenario : 'baseline'));
+  const [session, setSession] = useState<Session>(initial);
   const status = useMemo(() => (level ? evaluateLevel(level, session.history, data.balance) : undefined), [level, session.history, data]);
   const finished = status !== undefined && status.outcome !== 'playing';
+
+  // Автосохранение после каждого решения и хода; законченный уровень — в лучшие звёзды, сохранение больше не нужно.
+  useEffect(() => {
+    if (level && status && finished) {
+      writeStored('progress', JSON.stringify(withStars(parseProgress(readStored('progress')), level.id, status.stars)));
+      writeStored('save', null);
+    } else {
+      writeStored('save', JSON.stringify(toSave(mode, session)));
+    }
+  }, [session, finished]);
   const [tab, setTab] = useState<Tab>('policy');
   /** На телефоне панель свёрнута, чтобы карте хватало места; на компьютере она открыта всегда (CSS). */
   const [panelOpen, setPanelOpen] = useState(false);
