@@ -8,6 +8,7 @@ import type { Recipe, Scenario } from '../data/schemas';
 import type { Breakdown } from './causes';
 import { emptyQueue } from './delay';
 import type { Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, RouteMetrics, WorldState } from './state';
+import { householdTargetDebt } from './systems/credit';
 import { spendingShare } from './systems/demand';
 import {
   laborPerUnit,
@@ -316,16 +317,19 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       perCapita += marketPrice[good]![p.id]!.price * params.basePerCapita;
     }
     const wageIncome = (employment * wage * (1 - scenario.taxes.income) * p.laborForce) / laborForce;
-    return {
-      id: p.id,
-      nameKey: p.nameKey,
-      households: {
-        population: p.population,
-        laborForce: p.laborForce,
-        cash: Math.max(0, (perCapita * p.population) / s - wageIncome),
-        referenceSpendingPerCapita: perCapita,
-      },
+    const households = {
+      population: p.population,
+      laborForce: p.laborForce,
+      cash: Math.max(0, (perCapita * p.population) / s - wageIncome),
+      referenceSpendingPerCapita: perCapita,
+      debt: 0,
+      // В равновесии доходы ≈ траты; в начале первого хода income станет lastIncome.
+      income: perCapita * p.population,
+      lastIncome: perCapita * p.population,
     };
+    // Население стартует с желаемым долгом — без рывка кредита на первом ходу.
+    households.debt = householdTargetDebt(households, scenario.keyRate, balance);
+    return { id: p.id, nameKey: p.nameKey, households };
   });
 
   const routeMetrics: Record<string, RouteMetrics> = {};

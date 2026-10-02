@@ -35,7 +35,11 @@ export function payHouseholds(state: WorldState, amount: number, weight: (p: Pro
   let total = 0;
   for (const p of state.provinces) total += weight(p);
   if (total <= 0 || amount === 0) return;
-  for (const p of state.provinces) p.households.cash += (amount * weight(p)) / total;
+  for (const p of state.provinces) {
+    const share = (amount * weight(p)) / total;
+    p.households.cash += share;
+    p.households.income += share;
+  }
 }
 
 /** Зарплата: домохозяйства получают её за вычетом налога на доходы, налог уходит в бюджет. */

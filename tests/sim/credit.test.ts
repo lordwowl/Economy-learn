@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getGameData } from '../../src/data';
 import type { Firm } from '../../src/sim/state';
-import { borrowForPlan, chargeInterest, liquidate, repay } from '../../src/sim/systems/credit';
+import { borrowForPlan, chargeInterest, householdTargetDebt, liquidate, repay } from '../../src/sim/systems/credit';
 import { nextWage } from '../../src/sim/systems/labor';
 import { baseline, run, totalMoney } from './helpers';
 
@@ -70,6 +70,29 @@ describe('кредит (GDD 5.8)', () => {
     expect(liquidate(f, state)).toBe(0);
     expect(state.bank.writtenOff).toBe(500);
     expect(f.debt).toBe(0);
+  });
+});
+
+describe('кредит населению (GDD 5.5)', () => {
+  const hh = { population: 100, laborForce: 60, cash: 0, referenceSpendingPerCapita: 1, debt: 0, income: 0, lastIncome: 1000 };
+
+  it('желаемый долг = d0 × доход при нейтральной ставке и меньше при высокой', () => {
+    expect(householdTargetDebt(hh, balance.demand.neutralRate, balance)).toBeCloseTo(
+      balance.credit.householdTargetDebtToMonthlyIncome * 1000,
+      9,
+    );
+    expect(householdTargetDebt(hh, balance.demand.neutralRate + 0.05, balance)).toBeLessThan(
+      householdTargetDebt(hh, balance.demand.neutralRate, balance),
+    );
+    expect(householdTargetDebt(hh, 10, balance)).toBe(0);
+  });
+
+  it('ставка ↑ → население гасит кредиты (через лаг спроса), долг ниже, чем без повышения', () => {
+    const passive = run(12);
+    const hike = run(12, (t) => (t === 3 ? [{ type: 'setKeyRate', rate: 0.12 }] : []));
+    const debt = (s: (typeof passive.states)[number]) => s.provinces.reduce((a, p) => a + p.households.debt, 0);
+    expect(debt(hike.states[4]!)).toBeCloseTo(debt(passive.states[4]!), 6);
+    expect(debt(hike.states[8]!)).toBeLessThan(debt(passive.states[8]!));
   });
 });
 

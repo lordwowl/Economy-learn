@@ -174,6 +174,12 @@ export const balanceSchema = z.strictObject({
     entryMinUtilization: share,
     /** Минимальная наценка для входа новой фирмы. */
     entryMinMarkup: z.number().finite(),
+    /** Желаемый долг населения в месяцах дохода при нейтральной ставке. */
+    householdTargetDebtToMonthlyIncome: nonNegative,
+    /** На сколько месяцев дохода снижается желаемый долг на каждую единицу (ставка − нейтральная). */
+    householdDebtRateSensitivity: nonNegative,
+    /** Какую долю разрыва (желаемый − текущий долг) население закрывает за месяц: кредит или погашение. */
+    householdDebtAdjustSpeed: share,
   }),
   expectations: z.strictObject({
     /** π_цель. */

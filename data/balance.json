@@ -52,7 +52,10 @@
     "entryShortageThreshold": 0.05,
     "entryShortageTurns": 3,
     "entryMinUtilization": 0.9,
-    "entryMinMarkup": 0.15
+    "entryMinMarkup": 0.15,
+    "householdTargetDebtToMonthlyIncome": 2,
+    "householdDebtRateSensitivity": 10,
+    "householdDebtAdjustSpeed": 0.1
   },
   "expectations": {
     "inflationTarget": 0.04,

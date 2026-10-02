@@ -39,6 +39,12 @@ export interface Households {
   cash: number;
   /** B_ref: стартовые траты на душу в этой провинции. */
   referenceSpendingPerCapita: number;
+  /** Долг банку (потребительский кредит). */
+  debt: number;
+  /** Доходы за текущий ход (зарплата, трансферты, дивиденды, проценты банка) — копятся по ходу хода. */
+  income: number;
+  /** Доходы за прошлый ход: от них считается желаемый долг. */
+  lastIncome: number;
 }
 
 export interface Province {

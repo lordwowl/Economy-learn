@@ -15,7 +15,7 @@ import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type Cau
 import { schedule, spreadOverLag, takeDue } from './delay';
 import type { Rng } from './rng';
 import type { Action, Firm, GoodId, RouteMetrics, WorldState } from './state';
-import { borrowForPlan, chargeInterest, entryRoi, liquidate, loanRate, repay } from './systems/credit';
+import { borrowForPlan, chargeInterest, entryRoi, householdCredit, liquidate, loanRate, repay } from './systems/credit';
 import { planHouseholdPurchases } from './systems/demand';
 import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget } from './systems/government';
 import { nextExpectations } from './systems/expectations';
@@ -137,6 +137,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   // 1. Решения и отложенные эффекты.
   state.government.revenue = {};
   state.government.spending = {};
+  for (const p of state.provinces) {
+    p.households.lastIncome = p.households.income;
+    p.households.income = 0;
+  }
   for (const action of actions) applyAction(state, action, turn, data);
   const { due, queue } = takeDue(state.pending, turn);
   state.pending = queue;
@@ -269,6 +273,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       const pm = m.provinces[province.id];
       if (pm) markets[good] = pm;
     }
+    householdCredit(province.households, state, balance);
     const hp = planHouseholdPurchases(province.households, state.demandRate, markets, balance.demand);
     for (const [good, q] of Object.entries(hp.quantities)) {
       const bids = consumerBids.get(good) ?? [];
