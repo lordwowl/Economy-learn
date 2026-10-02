@@ -1,6 +1,7 @@
 // Отчёт уровня (GDD 6, 7): итог, цели и причинная цепочка «решение → итог» из журнала за весь уровень.
 // Цепочка строится автоматически: от показателя цели спускаемся по главной причине его изменения
-// (ИПЦ → цена хлеба → вход «мука» → цена муки → …), пока причина не станет «листом» (наценка, потолок, зарплата…).
+// (ИПЦ → цена хлеба → вход «мука» → цена муки → …), пока причина не станет «листом» (потолок, налог, шок…).
+// Рост наценки ведёт в недопроизводство товара (supplyLoss), нехватка входа — в недопроизводство входа.
 
 import type { Balance, Level } from '../data';
 import { aggregate, type Cause } from '../sim/causes';
@@ -9,7 +10,7 @@ import { evaluateLevel, type LevelStatus } from './level';
 import type { TurnRecord } from './session';
 
 /** Глубина цепочки: дальше текст перестаёт читаться. */
-const MAX_DEPTH = 5;
+const MAX_DEPTH = 6;
 /** Сколько цепочек в отчёте. */
 const MAX_CHAINS = 2;
 
@@ -33,6 +34,8 @@ export interface Chain {
   links: ChainLink[];
   /** Решения игрока, напрямую задающие первопричину (последнее звено). */
   decisions: Dated[];
+  /** События уровня (шоки), если первопричина — шок. */
+  events: Dated[];
 }
 
 export interface LevelReport {
@@ -42,11 +45,18 @@ export interface LevelReport {
   events: Dated[];
 }
 
-/** Куда спускаться дальше: причина «цена товара» или «вход» — это изменение цены этого товара. */
-function nextMetric(metric: string, ref: string): string | undefined {
-  const good = /^(?:price|input)\.([^.]+)$/.exec(ref)?.[1];
+/**
+ * Куда спускаться дальше. В цене: «цена товара» или «вход» — изменение цены этого товара, «зарплата» — изменение зарплаты,
+ * рост наценки — недопроизводство этого товара (наценка растёт, когда товара не хватает). В недопроизводстве:
+ * нехватка входа — недопроизводство входа.
+ */
+function nextMetric(metric: string, cause: Cause): string | undefined {
+  const good = /^(?:price|input)\.([^.]+)$/.exec(cause.ref)?.[1];
+  if (metric.startsWith('supplyLoss.')) return good !== undefined && cause.ref.startsWith('input.') ? `supplyLoss.${good}` : undefined;
   if (good !== undefined) return `price.${good}`;
-  if (ref === 'wage' && metric.startsWith('price.')) return 'wage';
+  if (!metric.startsWith('price.')) return undefined;
+  if (cause.ref === 'wage') return 'wage';
+  if (cause.ref === 'markup' && cause.value > 0) return `supplyLoss.${metric.split('.')[1]}`;
   return undefined;
 }
 
@@ -73,7 +83,7 @@ export function causalChain(history: readonly TurnRecord[], metric: string): Cha
     const cause = mainCause(event.causes, event.delta);
     if (!cause) break;
     links.push({ metric: current, delta: event.delta, cause });
-    current = nextMetric(current, cause.ref);
+    current = nextMetric(current, cause);
   }
   return links;
 }
@@ -84,6 +94,7 @@ export function decisionRefs(action: Action, metric: string): string[] {
   const inBudget = metric === 'budget.balance';
   switch (action.type) {
     case 'setPriceCeiling':
+      if (metric === `supplyLoss.${action.good}`) return ['unprofitable', 'priceCeiling'];
       return good === action.good ? ['priceCeiling', 'blackMarket'] : [];
     case 'setSubsidy':
       return good === action.good ? ['subsidy'] : inBudget ? ['subsidies'] : [];
@@ -109,18 +120,21 @@ function dated(history: readonly TurnRecord[], pick: (h: TurnRecord) => Action[]
   return history.flatMap((h) => pick(h).map((action) => ({ turn: h.state.turn, action })));
 }
 
-/** Метрика журнала, которой объясняется показатель цели (у дефицита и долга своей цепочки нет). */
+/** Метрика журнала, которой объясняется показатель цели (дефицит — недопроизводством; у долга своей цепочки нет). */
 function journalMetric(goalMetric: string): string | undefined {
   if (goalMetric === 'cpi' || goalMetric === 'inflationYoY') return 'cpi';
   if (goalMetric === 'unemployment') return 'unemployment';
   if (goalMetric === 'budgetBalance') return 'budget.balance';
   if (goalMetric === 'realWage') return 'wage';
   if (goalMetric.startsWith('price.')) return goalMetric;
+  const good = /^(?:shortage|maxShortage)\.(.+)$/.exec(goalMetric)?.[1];
+  if (good !== undefined) return `supplyLoss.${good}`;
   return undefined;
 }
 
 export function levelReport(level: Level, history: readonly TurnRecord[], balance: Balance): LevelReport {
   const decisions = dated(history, (h) => h.actions);
+  const events = dated(history, (h) => h.events);
   const metrics: string[] = [];
   for (const goal of level.goals) {
     const m = goal.condition.kind === 'metric' ? journalMetric(goal.condition.metric) : undefined;
@@ -132,8 +146,12 @@ export function levelReport(level: Level, history: readonly TurnRecord[], balanc
     const links = causalChain(history, metric);
     if (links.length === 0) continue;
     const root = links.at(-1)!;
-    chains.push({ links, decisions: decisions.filter((d) => decisionRefs(d.action, root.metric).includes(root.cause.ref)) });
+    chains.push({
+      links,
+      decisions: decisions.filter((d) => decisionRefs(d.action, root.metric).includes(root.cause.ref)),
+      events: events.filter((e) => e.action.type === 'shock' && root.cause.ref === `shock.${e.action.shock}`),
+    });
     if (chains.length >= MAX_CHAINS) break;
   }
-  return { status: evaluateLevel(level, history, balance), chains, decisions, events: dated(history, (h) => h.events) };
+  return { status: evaluateLevel(level, history, balance), chains, decisions, events };
 }

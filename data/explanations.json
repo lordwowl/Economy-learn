@@ -60,6 +60,19 @@
         { "pattern": "subsidies", "up": "cause.budget.subsidies" },
         { "pattern": "reserve", "up": "cause.budget.reserve" }
       ]
+    },
+    {
+      "id": "supplyLoss",
+      "metrics": [{ "pattern": "supplyLoss.{good}", "key": "metric.supplyLoss" }],
+      "causes": [
+        { "pattern": "capacity", "up": "cause.loss.capacity" },
+        { "pattern": "unprofitable", "up": "cause.loss.unprofitable" },
+        { "pattern": "priceCeiling", "up": "cause.loss.priceCeiling" },
+        { "pattern": "shock.{shock}", "up": "cause.loss.shock" },
+        { "pattern": "cash", "up": "cause.loss.cash" },
+        { "pattern": "labor", "up": "cause.loss.labor" },
+        { "pattern": "input.{good}", "up": "cause.loss.input" }
+      ]
     }
   ]
 }

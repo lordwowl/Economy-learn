@@ -21,8 +21,8 @@ import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget 
 import { nextExpectations } from './systems/expectations';
 import { laborScale, nextWage, unemploymentRate } from './systems/labor';
 import { legKey, routeCapacity } from './systems/logistics';
-import { nextMarkup, nextPriceBreakdown, unitCostBreakdown, withCeiling, withoutCeiling } from './systems/pricing';
-import { affordableRuns, costPerRun, coverage, feasibleRuns, lossOutputFactor, plannedRuns } from './systems/production';
+import { COMPONENT, nextMarkup, nextPriceBreakdown, unitCostBreakdown, withCeiling, withoutCeiling } from './systems/pricing';
+import { affordableRuns, costPerRun, coverage, desiredRuns, feasibleRunsBreakdown, lossOutputFactor } from './systems/production';
 import { clearMarket } from './market';
 import { freeSpace } from './systems/reserve';
 import { Trade, type TradeBid } from './trade';
@@ -192,17 +192,27 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     return prices;
   };
 
-  /** Модификатор шока (GDD 5.3): произведение множителей мощности действующих шоков для здания фирмы. */
-  const shockMultiplier = (firm: Firm): number => {
-    let m = 1;
+  /** Множители мощности действующих шоков для здания фирмы (GDD 5.3); модификатор шока — их произведение. */
+  const shockEffects = (firm: Firm): { id: string; multiplier: number }[] => {
+    const effects: { id: string; multiplier: number }[] = [];
     for (const active of state.activeShocks) {
       for (const effect of data.shocks.find((s) => s.id === active.id)?.effects ?? []) {
         if (effect.building === firm.building && (effect.province === undefined || effect.province === firm.province)) {
-          m *= effect.multiplier;
+          effects.push({ id: active.id, multiplier: effect.multiplier });
         }
       }
     }
-    return m;
+    return effects;
+  };
+
+  // Недопроизводство (GDD 6): сколько запусков желаемого плана не состоялось и из-за чего.
+  // Ограничения применяются по очереди, поэтому Σ потерь = желаемый план − фактические запуски.
+  const lostRuns = new Map<string, Breakdown>();
+  const addLost = (firm: Firm, ref: string, runs: number) => {
+    if (runs <= 0) return;
+    const lost = lostRuns.get(firm.id) ?? {};
+    lost[ref] = (lost[ref] ?? 0) + runs;
+    lostRuns.set(firm.id, lost);
   };
 
   // 2. Планы; не хватает денег на выгодный план — оборотный кредит.  Шок урезает доступную мощность.
@@ -211,16 +221,26 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const recipe = recipeOf(firm);
     const prices = localPrices(firm.province);
     const unitCost = costPerRun(recipe, prices, state.wage) / recipe.output.amount;
-    const netPrice =
-      firm.price * (1 - state.government.taxes.sales) + (state.government.subsidies[recipe.output.good] ?? 0);
-    const planned = Math.min(
-      plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms),
-      firm.capacity * shockMultiplier(firm),
-    );
+    const netPrice = firm.price * (1 - state.government.taxes.sales) + (state.government.subsidies[recipe.output.good] ?? 0);
+    const desired = desiredRuns(firm, recipe, balance.firms);
+    const lossFactor = lossOutputFactor(netPrice, unitCost, balance.firms);
+    const profitable = Math.min(firm.capacity, desired) * lossFactor;
+    const effects = shockEffects(firm);
+    const planned = Math.min(profitable, firm.capacity * effects.reduce((m, e) => m * e.multiplier, 1));
+    // Сначала убыточность, потом мощность (Σ = желаемый − выгодный план при любом порядке).
+    addLost(firm, 'unprofitable', desired * (1 - lossFactor));
+    // Цена срезана потолком — спрос по заниженной цене больше мощности: причина — потолок, а не нехватка мощностей.
+    const capped = (firm.breakdown[COMPONENT.priceCeiling] ?? 0) < 0;
+    addLost(firm, capped ? 'priceCeiling' : 'capacity', lossFactor * Math.max(0, desired - firm.capacity));
+    // Потеря от нескольких шоков сразу делится пропорционально тому, сколько мощности срезал каждый.
+    const cut = effects.reduce((sum, e) => sum + (1 - e.multiplier), 0);
+    for (const e of effects) addLost(firm, `shock.${e.id}`, cut > 0 ? ((profitable - planned) * (1 - e.multiplier)) / cut : 0);
     if (planned > affordableRuns(firm, recipe, prices, state.wage)) {
       borrowForPlan(firm, recipe, planned, prices, state.wage, state.government.taxes.sales, balance.credit);
     }
-    plan.set(firm.id, Math.min(planned, affordableRuns(firm, recipe, prices, state.wage)));
+    const affordable = Math.min(planned, affordableRuns(firm, recipe, prices, state.wage));
+    addLost(firm, 'cash', planned - affordable);
+    plan.set(firm.id, affordable);
   }
   // Труда на всех не хватает → фабрики и перевозчик (по его загрузке прошлого хода) урезаются в одной пропорции.
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
@@ -228,7 +248,11 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) firmLabor += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
   const carrierLabor = state.logistics.carriers.reduce((s, c) => s + c.lastLabor, 0);
   const scale = laborScale(firmLabor + carrierLabor, laborForce);
-  for (const [id, runs] of plan) plan.set(id, runs * scale);
+  for (const firm of state.firms) {
+    const runs = plan.get(firm.id) ?? 0;
+    addLost(firm, 'labor', runs - runs * scale);
+    plan.set(firm.id, runs * scale);
+  }
   const laborRequired = firmLabor * scale;
 
   // 3. Топливо перевозчика и рынок входов.
@@ -293,7 +317,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   let wageBill = 0;
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
-    const runs = feasibleRuns(firm, recipe, plan.get(firm.id) ?? 0, state.wage);
+    const { runs, lost } = feasibleRunsBreakdown(firm, recipe, plan.get(firm.id) ?? 0, state.wage);
+    for (const [ref, value] of Object.entries(lost)) addLost(firm, ref, value);
     for (const input of recipe.inputs) {
       firm.inventory[input.good] = Math.max(0, (firm.inventory[input.good] ?? 0) - runs * input.amount);
     }
@@ -310,6 +335,19 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   // Труд, зарезервированный под планы, но не использованный, освобождается для перевозок.
   trade.laborLeft = laborForce - productionLabor - trade.logisticsLabor;
   payWages(state, wageBill);
+
+  // Журнал недопроизводства: по товару, в единицах выпуска.
+  const lostByGood: Record<GoodId, Breakdown> = {};
+  for (const firm of state.firms) {
+    const recipe = recipeOf(firm);
+    const byGood = (lostByGood[recipe.output.good] ??= {});
+    for (const [ref, runs] of Object.entries(lostRuns.get(firm.id) ?? {})) {
+      byGood[ref] = (byGood[ref] ?? 0) + runs * recipe.output.amount;
+    }
+  }
+  for (const [good, lost] of Object.entries(lostByGood)) {
+    if (sumBreakdown(lost) > 0) causes.push(makeCauseEvent(turn, `supplyLoss.${good}`, lost));
+  }
 
   // 5. Потребительский рынок.
   const consumerBids = new Map<GoodId, TradeBid[]>();
@@ -480,8 +518,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
     const interest = chargeInterest(firm, state, balance.credit);
-    const profit =
-      (trade.revenue.get(firm.id) ?? 0) + (trade.subsidyReceived.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0) - interest;
+    const profit = (trade.revenue.get(firm.id) ?? 0) + (trade.subsidyReceived.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0) - interest;
     const profitTax = Math.max(0, profit) * state.government.taxes.profit;
     firm.cash -= profitTax;
     addRevenue(state, BUDGET.profitTax, profitTax);
@@ -551,9 +588,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       const unmet = outcomes.reduce((s, o) => s + (o?.unmetByProvince[province.id] ?? 0), 0);
       pm.shortageTurns = demanded > 0 && unmet / demanded > balance.credit.entryShortageThreshold ? pm.shortageTurns + 1 : 0;
       if (pm.shortageTurns < balance.credit.entryShortageTurns) continue;
-      const building = data.buildings.find(
-        (b) => b.kind === 'producer' && b.owner === 'private' && recipes.get(b.recipe)?.output.good === good,
-      );
+      const building = data.buildings.find((b) => b.kind === 'producer' && b.owner === 'private' && recipes.get(b.recipe)?.output.good === good);
       if (building?.kind !== 'producer') continue;
       const recipe = recipes.get(building.recipe)!;
       const markup = producers.length > 0 ? mean(producers.map((f) => f.markup)) : balance.firms.initialMarkup;

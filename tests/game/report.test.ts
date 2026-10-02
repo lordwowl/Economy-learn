@@ -27,15 +27,27 @@ describe('отчёт уровня: причинная цепочка (GDD 6)', (
     const chain = causalChain(passive.history, 'cpi');
     expect(chain[0]!.metric).toBe('cpi');
     const events = passive.history.flatMap((h) => h.causes);
-    for (const [i, link] of chain.entries()) {
+    for (const link of chain) {
       const total = aggregate(events, link.metric);
       expect(link.delta).toBeCloseTo(total.delta, 9);
       expect(Math.sign(link.cause.value)).toBe(Math.sign(link.delta));
       const same = total.causes.filter((c) => Math.sign(c.value) === Math.sign(total.delta));
       expect(Math.abs(link.cause.value)).toBe(Math.max(...same.map((c) => Math.abs(c.value))));
-      const next = chain[i + 1];
-      if (next) expect(next.metric).toBe(`price.${link.cause.ref.split('.').at(-1)}`.replace('price.wage', 'wage'));
     }
+    // Неурожай: ИПЦ → цена хлеба → наценка → недопроизводство хлеба → мука → зерно → шок.
+    expect(chain.map((l) => `${l.metric}←${l.cause.ref}`)).toEqual([
+      'cpi←price.bread',
+      'price.bread←markup',
+      'supplyLoss.bread←input.flour',
+      'supplyLoss.flour←input.grain',
+      'supplyLoss.grain←shock.harvestFailure',
+    ]);
+  });
+
+  it('первопричина-шок связана с событием уровня', () => {
+    const chain = levelReport(harvest, passive.history, data.balance).chains.find((c) => c.links[0]!.metric === 'cpi')!;
+    expect(chain.events).toEqual([{ turn: 3, action: { type: 'shock', shock: 'harvestFailure' } }]);
+    expect(chain.decisions).toEqual([]);
   });
 
   it('у каждого звена и его причины есть шаблон текста', () => {
@@ -52,11 +64,15 @@ describe('отчёт уровня: причинная цепочка (GDD 6)', (
 
   it('потолок цен: цепочка ведёт к решению игрока', () => {
     const report = levelReport(harvest, ceiling.history, data.balance);
-    const chain = report.chains[0]!;
-    expect(chain.links.map((l) => l.metric)).toEqual(['cpi', 'price.bread']);
-    expect(chain.links.at(-1)!.cause.ref).toBe('priceCeiling');
-    expect(chain.decisions).toHaveLength(1);
-    expect(chain.decisions[0]).toMatchObject({ turn: 2, action: { type: 'setPriceCeiling', good: 'bread' } });
+    // Цель «дефицит хлеба» объясняется недопроизводством, ИПЦ — ценой хлеба; обе цепочки упираются в потолок.
+    expect(report.chains.map((c) => c.links.map((l) => `${l.metric}←${l.cause.ref}`))).toEqual([
+      ['supplyLoss.bread←priceCeiling'],
+      ['cpi←price.bread', 'price.bread←priceCeiling'],
+    ]);
+    for (const chain of report.chains) {
+      expect(chain.decisions).toHaveLength(1);
+      expect(chain.decisions[0]).toMatchObject({ turn: 2, action: { type: 'setPriceCeiling', good: 'bread' } });
+    }
   });
 
   it('в отчёте — решения игрока и события уровня с месяцами', () => {
@@ -69,6 +85,7 @@ describe('отчёт уровня: причинная цепочка (GDD 6)', (
   it('решения связаны только со своими причинами', () => {
     expect(decisionRefs({ type: 'setPriceCeiling', good: 'bread', price: 1 }, 'price.bread')).toEqual(['priceCeiling', 'blackMarket']);
     expect(decisionRefs({ type: 'setPriceCeiling', good: 'bread', price: 1 }, 'price.flour')).toEqual([]);
+    expect(decisionRefs({ type: 'setPriceCeiling', good: 'bread', price: 1 }, 'supplyLoss.bread')).toEqual(['unprofitable', 'priceCeiling']);
     expect(decisionRefs({ type: 'setSubsidy', good: 'flour', perUnit: 1 }, 'price.flour')).toEqual(['subsidy']);
     expect(decisionRefs({ type: 'setTax', tax: 'sales', rate: 0.1 }, 'price.bread')).toEqual(['tax.sales']);
     expect(decisionRefs({ type: 'setTax', tax: 'income', rate: 0.1 }, 'budget.balance')).toEqual(['tax.income']);
