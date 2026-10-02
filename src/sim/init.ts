@@ -7,7 +7,7 @@ import type { GameData } from '../data/load';
 import type { Recipe, Scenario } from '../data/schemas';
 import type { Breakdown } from './causes';
 import { emptyQueue } from './delay';
-import type { Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, RouteMetrics, WorldState } from './state';
+import type { Carrier, Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, RouteMetrics, WorldState } from './state';
 import { householdTargetDebt } from './systems/credit';
 import { spendingShare } from './systems/demand';
 import {
@@ -170,7 +170,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       }
       balances.push({ good, deficits, stocks });
     }
-    const list = planShipments(balances, paths, { capacityLeft, fuel: Infinity, labor: Infinity }, cfg);
+    const list = planShipments(balances, paths, { capacityLeft, work: Infinity, labor: Infinity }, cfg);
     const shipments: Record<GoodId, Shipment[]> = Object.fromEntries(order.map((g) => [g, []]));
     const requested: Logistics['requested'] = { inputs: {}, consumer: {} };
     let work = 0;
@@ -194,7 +194,18 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const producerPrice: Record<GoodId, Record<string, InputPrice>> = {};
   const marketPrice: Record<GoodId, Record<string, InputPrice>> = {};
   let fuelPrice = 0;
-  const tariffOf = (path: Path) => tariff(path, fuelPrice, wage, cfg);
+  // Перевозчики: госпарк из сценария берёт работу первым, частный — остальное.
+  const fleetBuilding = data.buildings.find((b) => b.kind === 'fleet');
+  const workPerUnit = fleetBuilding?.kind === 'fleet' ? fleetBuilding.workCapacity : 0;
+  const stateWork = Math.min(plan.work, scenario.fleet.state * workPerUnit);
+  const privateWork = plan.work - stateWork;
+  const privateFleet =
+    scenario.fleet.private === 'auto'
+      ? Math.ceil(privateWork / (workPerUnit * balance.credit.entryMinUtilization))
+      : scenario.fleet.private;
+  const stateShare = plan.work > 0 ? stateWork / plan.work : 0;
+  const tariffOf = (path: Path) =>
+    stateShare * tariff(path, fuelPrice, wage, cfg, 0) + (1 - stateShare) * tariff(path, fuelPrice, wage, cfg, cfg.markup);
   for (const good of order) {
     const recipe = recipeByGood.get(good)!;
     producerPrice[good] = {};
@@ -295,12 +306,33 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   for (const list of Object.values(plan.shipments)) for (const sh of list) gdp += sh.quantity * tariffOf(sh.path);
   gdp -= plan.work * cfg.fuelPerUnitLength * fuelPrice;
 
+  const carrier = (id: Carrier['id'], markup: number, work: number, fleet: number): Carrier => {
+    const share = plan.work > 0 ? work / plan.work : 0;
+    const labor = plan.logisticsLabor * share;
+    let revenue = 0;
+    for (const list of Object.values(plan.shipments)) {
+      for (const sh of list) revenue += sh.quantity * share * tariff(sh.path, fuelPrice, wage, cfg, markup);
+    }
+    return {
+      id,
+      markup,
+      cash: id === 'state' ? 0 : balance.firms.cashBufferTurns * (work * cfg.fuelPerUnitLength * fuelPrice + labor * wage),
+      debt: 0,
+      fuel: work * cfg.fuelPerUnitLength * balance.firms.targetCoverage,
+      fleet,
+      fleetOrdered: 0,
+      workHistory: Array.from({ length: balance.firms.salesAverageTurns }, () => work),
+      lastWork: work,
+      lastLabor: labor,
+      lastRevenue: revenue,
+    };
+  };
+
   const logistics: Logistics = {
-    cash: balance.firms.cashBufferTurns * (plan.work * cfg.fuelPerUnitLength * fuelPrice + plan.logisticsLabor * wage),
-    fuel: plan.work * cfg.fuelPerUnitLength * balance.firms.targetCoverage,
-    workHistory: Array.from({ length: balance.firms.salesAverageTurns }, () => plan.work),
-    lastWork: plan.work,
-    lastLabor: plan.logisticsLabor,
+    carriers: [
+      carrier('state', 0, stateWork, scenario.fleet.state),
+      carrier('private', cfg.markup, privateWork, privateFleet),
+    ],
     requested: plan.requested,
   };
 

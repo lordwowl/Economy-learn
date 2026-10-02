@@ -1,7 +1,9 @@
 // Торговля по провинциям (GDD 5.16, 5.17).
 // Сначала покупатели берут местное (рынок провинции), затем нехватку довозят из других провинций
 // по кратчайшему пути. Цена доставленного = средняя цена продавцов провинции-источника + тариф.
-// Перевозчик тратит своё топливо и нанимает труд; не влезшее в дороги остаётся у продавцов («очередь»).
+// Возят перевозчики: сначала тот, у кого тариф ниже (госпарк без наценки), остальное — частный.
+// Каждый тратит своё топливо и нанимает труд; работа ограничена парком; не влезшее в дороги
+// остаётся у продавцов («очередь»).
 // Пропускная способность участков (дорога в одну сторону) делится между рынком входов и потребительским рынком пропорционально
 // заявкам прошлого хода; внутри рынка все товары планируются вместе и при пробке урезаются одинаково.
 
@@ -9,7 +11,8 @@ import type { GameData } from '../data/load';
 import type { Recipe } from '../data/schemas';
 import type { Breakdown } from './causes';
 import { clearMarket, type Bid, type Offer } from './market';
-import type { Firm, GoodId, TradePhase, WorldState } from './state';
+import type { Carrier, CarrierId, Firm, GoodId, TradePhase, WorldState } from './state';
+import { addRevenue, addSpending, BUDGET } from './systems/government';
 import {
   fuelPerUnit,
   laborPerUnit,
@@ -21,7 +24,6 @@ import {
   type GoodBalance,
   type Path,
 } from './systems/logistics';
-import { addRevenue, addSpending, BUDGET } from './systems/government';
 import { COMPONENT } from './systems/pricing';
 
 export interface TradeBid extends Bid {
@@ -45,6 +47,20 @@ interface Tally {
   weighted: Breakdown;
 }
 
+/** Итоги перевозчика за ход. */
+export interface CarrierTurn {
+  /** Работа, которую ему поручили (с учётом не влезшего в парк — для частного). */
+  requestedWork: number;
+  work: number;
+  labor: number;
+  wages: number;
+  revenue: number;
+  fuelCost: number;
+}
+
+/** Доли перевозчиков в одной перевозке. */
+type CarrierMix = { carrier: Carrier; share: number }[];
+
 export class Trade {
   readonly soldByFirm = new Map<string, number>();
   readonly revenue = new Map<string, number>();
@@ -53,9 +69,6 @@ export class Trade {
   readonly subsidyReceived = new Map<string, number>();
   /** Покупки входов фирмами (для ВВП). */
   readonly inputSpent = new Map<string, number>();
-  /** Выручка перевозчика за доставку и его расходы на топливо (для ВВП). */
-  logisticsRevenue = 0;
-  logisticsFuelCost = 0;
   /** tallies[товар][провинция]. */
   readonly tallies: Record<GoodId, Record<string, Tally>> = {};
   readonly unmetByGood: Record<GoodId, number> = {};
@@ -63,12 +76,12 @@ export class Trade {
   readonly legFlow: Record<string, number> = {};
   readonly legBlocked: Record<string, number> = {};
   readonly requested: Record<TradePhase, Record<string, number>> = { inputs: {}, consumer: {} };
-  /** Заявленная работа (до ограничений дорог и ресурсов): по ней перевозчик планирует топливо. */
-  requestedWork = 0;
-  work = 0;
-  logisticsLabor = 0;
-  /** Зарплата, которую перевозчик заплатил за ход (её получают домохозяйства). */
-  logisticsWages = 0;
+  readonly carriers: Record<CarrierId, CarrierTurn> = {
+    private: { requestedWork: 0, work: 0, labor: 0, wages: 0, revenue: 0, fuelCost: 0 },
+    state: { requestedWork: 0, work: 0, labor: 0, wages: 0, revenue: 0, fuelCost: 0 },
+  };
+  /** Продано из резерва за ход: [товар][провинция]. */
+  readonly reserveSold: Record<GoodId, Record<string, number>> = {};
   laborLeft: number;
 
   private readonly paths: Map<string, Path>;
@@ -76,10 +89,12 @@ export class Trade {
   private readonly capacityLeft: Record<string, number> = {};
   private readonly firmsByGood = new Map<GoodId, Firm[]>();
   private readonly fuelPrice: number;
+  /** Сколько работы ещё может сделать перевозчик за ход (парк). */
+  private readonly workLeft: Record<CarrierId, number> = { private: 0, state: 0 };
+  /** Топливо, зарезервированное под запланированные, но ещё не выполненные перевозки. */
+  private readonly fuelReserved: Record<CarrierId, number> = { private: 0, state: 0 };
   /** Интервенции этого хода: reserveOffers[товар][провинция] = { осталось продать, цена }. */
   private readonly reserveOffers: Record<GoodId, Record<string, { quantity: number; price: number }>> = {};
-  /** Продано из резерва за ход: [товар][провинция]. */
-  readonly reserveSold: Record<GoodId, Record<string, number>> = {};
 
   constructor(
     private readonly state: WorldState,
@@ -109,22 +124,39 @@ export class Trade {
       this.firmsByGood.set(good, list);
     }
     this.fuelPrice = state.market[data.balance.logistics.fuelGood]?.price ?? 0;
+    const fleet = data.buildings.find((b) => b.kind === 'fleet');
+    for (const c of state.logistics.carriers) this.workLeft[c.id] = fleet?.kind === 'fleet' ? c.fleet * fleet.workCapacity : 0;
   }
 
-  tariffFor(path: Path): number {
-    return tariff(path, this.fuelPrice, this.state.wage, this.data.balance.logistics);
+  /** Перевозчики в порядке выбора: дешёвые первыми. */
+  private get carrierOrder(): Carrier[] {
+    return [...this.state.logistics.carriers].sort((a, b) => a.markup - b.markup || a.id.localeCompare(b.id));
   }
 
-  /** Перевозчик докупает топливо у всех НПЗ страны (заправляется там, где стоят машины). */
-  buyLogisticsFuel(quantity: number): void {
+  /** Сколько работы перевозчик может сделать прямо сейчас: остаток парка и топливо. */
+  private room(carrier: Carrier): number {
+    const perWork = this.data.balance.logistics.fuelPerUnitLength;
+    const byFuel = perWork > 0 ? Math.max(0, carrier.fuel - this.fuelReserved[carrier.id]) / perWork : Infinity;
+    return Math.max(0, Math.min(this.workLeft[carrier.id], byFuel));
+  }
+
+  tariffFor(path: Path, markup: number): number {
+    return tariff(path, this.fuelPrice, this.state.wage, this.data.balance.logistics, markup);
+  }
+
+  /** Перевозчик докупает топливо у всех НПЗ страны. Госперевозчику платит бюджет (касса может уйти в минус до конца хода). */
+  buyCarrierFuel(carrier: Carrier, quantity: number): void {
+    if (quantity <= 0) return;
     const good = this.data.balance.logistics.fuelGood;
     const sellers = this.firmsByGood.get(good) ?? [];
-    const logistics = this.state.logistics;
-    const result = clearMarket(this.offers(sellers, good), [{ buyer: 'logistics', quantity, budget: logistics.cash }]);
+    const buyer = `carrier.${carrier.id}`;
+    const budget = carrier.id === 'state' ? Infinity : Math.max(0, carrier.cash);
+    const result = clearMarket(this.offers(sellers, good), [{ buyer, quantity, budget }]);
     for (const firm of sellers) this.sell(firm, good, result.sold.get(firm.id) ?? 0, firm.province, 0);
-    logistics.fuel += result.bought.get('logistics') ?? 0;
-    logistics.cash -= result.paid.get('logistics') ?? 0;
-    this.logisticsFuelCost += result.paid.get('logistics') ?? 0;
+    carrier.fuel += result.bought.get(buyer) ?? 0;
+    const paid = result.paid.get(buyer) ?? 0;
+    carrier.cash -= paid;
+    this.carriers[carrier.id].fuelCost += paid;
   }
 
   /** Интервенция: резерв продаёт товар на местном рынке провинции (в обеих фазах, пока не продаст). */
@@ -190,18 +222,41 @@ export class Trade {
       balances.push({ good, deficits, stocks });
     }
 
-    // 2. Довоз: план перевозок всех товаров фазы вместе.
+    // 2. Довоз: план перевозок всех товаров фазы вместе; работа ограничена парком и топливом перевозчиков.
+    const carriers = this.carrierOrder;
     const shipments = planShipments(
       balances,
       this.paths,
-      { capacityLeft: this.phaseCapacity(phase), fuel: this.state.logistics.fuel, labor: this.laborLeft },
+      {
+        capacityLeft: this.phaseCapacity(phase),
+        work: carriers.reduce((s, c) => s + this.room(c), 0),
+        labor: this.laborLeft,
+      },
       cfg,
     );
+    const mixes = new Map<(typeof shipments)[number], CarrierMix>();
+    const room = carriers.reduce((s, c) => s + this.room(c), 0);
+    let wanted = 0;
     for (const s of shipments) {
-      this.requestedWork += s.requested * s.path.length;
+      wanted += (s.requested - s.blockedByRoad) * s.path.length;
       for (const e of s.path.edges) this.requested[phase][e] = (this.requested[phase][e] ?? 0) + s.requested;
       for (const e of s.bottlenecks) this.legBlocked[e] = (this.legBlocked[e] ?? 0) + s.blockedByRoad;
+      // Распределение работы между перевозчиками: дешёвые первыми, в пределах парка и топлива.
+      let work = s.quantity * s.path.length;
+      const mix: CarrierMix = [];
+      for (const c of carriers) {
+        const take = Math.min(work, this.room(c));
+        if (take <= 0) continue;
+        this.workLeft[c.id] -= take;
+        this.fuelReserved[c.id] += take * cfg.fuelPerUnitLength;
+        this.carriers[c.id].requestedWork += take;
+        mix.push({ carrier: c, share: take / (s.quantity * s.path.length) });
+        work -= take;
+      }
+      mixes.set(s, mix);
     }
+    // Работу, на которую не хватило парка и топлива, видит частный перевозчик: это сигнал расширять парк.
+    this.carriers.private.requestedWork += Math.max(0, wanted - room);
 
     for (const [good, rest] of remaining) {
       const sellers = this.firmsByGood.get(good) ?? [];
@@ -213,10 +268,10 @@ export class Trade {
           const from = sellers.filter((f) => f.province === s.from);
           const stock = from.reduce((sum, f) => sum + (f.inventory[good] ?? 0), 0);
           const value = from.reduce((sum, f) => sum + (f.inventory[good] ?? 0) * f.price, 0);
-          return { seller: s.from, price: (stock > 0 ? value / stock : 0) + this.tariffFor(s.path), quantity: s.quantity };
+          return { seller: s.from, price: (stock > 0 ? value / stock : 0) + this.mixTariff(s.path, mixes.get(s)!), quantity: s.quantity };
         });
         const result = clearMarket(offers, left);
-        for (const s of incoming) this.ship(good, s.from, s.path, result.sold.get(s.from) ?? 0, sellers, province);
+        for (const s of incoming) this.ship(good, s.from, s.path, s.quantity, result.sold.get(s.from) ?? 0, mixes.get(s)!, sellers, province);
         for (const bid of left) {
           const got = result.bought.get(bid.buyer) ?? 0;
           add(outcome.bought, bid.buyer, got);
@@ -229,31 +284,10 @@ export class Trade {
     return outcomes;
   }
 
-  /** Продажа из резерва: деньги — в бюджет, в цене — компонента reserve. */
-  private sellFromReserve(good: GoodId, province: string, quantity: number, offer: { quantity: number; price: number }): void {
-    if (quantity <= 0) return;
-    offer.quantity -= quantity;
-    const sold = (this.reserveSold[good] ??= {});
-    sold[province] = (sold[province] ?? 0) + quantity;
-    const stock = (this.state.reserve.stock[province] ??= {});
-    stock[good] = Math.max(0, (stock[good] ?? 0) - quantity);
-    addRevenue(this.state, BUDGET.reserveSales, quantity * offer.price);
-    const tally = ((this.tallies[good] ??= {})[province] ??= { quantity: 0, weighted: {} });
-    tally.quantity += quantity;
-    tally.weighted[COMPONENT.reserve] = (tally.weighted[COMPONENT.reserve] ?? 0) + quantity * offer.price;
-  }
-
-  /** Продажа «из-под полы»: товар уже отложен со склада, налога нет, премия к официальной цене — компонента blackMarket. */
-  sellBlack(firm: Firm, good: GoodId, quantity: number, province: string, price: number): void {
-    if (quantity <= 0) return;
-    firm.cash += quantity * price;
-    add(this.soldByFirm, firm.id, quantity);
-    add(this.revenue, firm.id, quantity * price);
-    const byProvince = (this.tallies[good] ??= {});
-    const tally = (byProvince[province] ??= { quantity: 0, weighted: {} });
-    tally.quantity += quantity;
-    for (const [ref, v] of Object.entries(firm.breakdown)) tally.weighted[ref] = (tally.weighted[ref] ?? 0) + quantity * v;
-    tally.weighted[COMPONENT.blackMarket] = (tally.weighted[COMPONENT.blackMarket] ?? 0) + quantity * (price - firm.price);
+  private mixTariff(path: Path, mix: CarrierMix): number {
+    let t = 0;
+    for (const { carrier, share } of mix) t += share * this.tariffFor(path, carrier.markup);
+    return t;
   }
 
   private offers(firms: readonly Firm[], good: GoodId): Offer[] {
@@ -284,28 +318,92 @@ export class Trade {
     if (delivery !== 0) tally.weighted[COMPONENT.logistics] = (tally.weighted[COMPONENT.logistics] ?? 0) + quantity * delivery;
   }
 
-  /** Перевозка: продавцы провинции-источника отгружают пропорционально складу, перевозчик тратит топливо и труд. */
-  private ship(good: GoodId, fromProvince: string, path: Path, shipped: number, sellers: readonly Firm[], to: string): void {
-    if (shipped <= 0) return;
+  /** Продажа из резерва: деньги — в бюджет, в цене — компонента reserve. */
+  private sellFromReserve(good: GoodId, province: string, quantity: number, offer: { quantity: number; price: number }): void {
+    if (quantity <= 0) return;
+    offer.quantity -= quantity;
+    const sold = (this.reserveSold[good] ??= {});
+    sold[province] = (sold[province] ?? 0) + quantity;
+    const stock = (this.state.reserve.stock[province] ??= {});
+    stock[good] = Math.max(0, (stock[good] ?? 0) - quantity);
+    addRevenue(this.state, BUDGET.reserveSales, quantity * offer.price);
+    const tally = ((this.tallies[good] ??= {})[province] ??= { quantity: 0, weighted: {} });
+    tally.quantity += quantity;
+    tally.weighted[COMPONENT.reserve] = (tally.weighted[COMPONENT.reserve] ?? 0) + quantity * offer.price;
+  }
+
+  /** Продажа «из-под полы»: товар уже отложен со склада, налога нет, премия к официальной цене — компонента blackMarket. */
+  sellBlack(firm: Firm, good: GoodId, quantity: number, province: string, price: number): void {
+    if (quantity <= 0) return;
+    firm.cash += quantity * price;
+    add(this.soldByFirm, firm.id, quantity);
+    add(this.revenue, firm.id, quantity * price);
+    const byProvince = (this.tallies[good] ??= {});
+    const tally = (byProvince[province] ??= { quantity: 0, weighted: {} });
+    tally.quantity += quantity;
+    for (const [ref, v] of Object.entries(firm.breakdown)) tally.weighted[ref] = (tally.weighted[ref] ?? 0) + quantity * v;
+    tally.weighted[COMPONENT.blackMarket] = (tally.weighted[COMPONENT.blackMarket] ?? 0) + quantity * (price - firm.price);
+  }
+
+  /**
+   * Перевозка: продавцы провинции-источника отгружают пропорционально складу; перевозчики — по своим долям —
+   * получают тариф, тратят топливо и труд. Неиспользованная часть зарезервированного парка возвращается.
+   */
+  private ship(
+    good: GoodId,
+    fromProvince: string,
+    path: Path,
+    planned: number,
+    shipped: number,
+    mix: CarrierMix,
+    sellers: readonly Firm[],
+    to: string,
+  ): void {
     const cfg = this.data.balance.logistics;
+    for (const { carrier, share } of mix) {
+      this.workLeft[carrier.id] += (planned - shipped) * share * path.length;
+      this.fuelReserved[carrier.id] -= planned * share * path.length * cfg.fuelPerUnitLength;
+    }
+    if (shipped <= 0) return;
     const from = sellers.filter((f) => f.province === fromProvince);
     const stock = from.reduce((sum, f) => sum + (f.inventory[good] ?? 0), 0);
-    const delivery = this.tariffFor(path);
+    const delivery = this.mixTariff(path, mix);
     if (stock > 0) for (const firm of from) this.sell(firm, good, (shipped * (firm.inventory[good] ?? 0)) / stock, to, delivery);
-    const logistics = this.state.logistics;
-    const labor = shipped * laborPerUnit(path, cfg);
-    const wages = labor * this.state.wage;
-    logistics.cash += shipped * delivery - wages;
-    this.logisticsRevenue += shipped * delivery;
-    logistics.fuel = Math.max(0, logistics.fuel - shipped * fuelPerUnit(path, cfg));
-    this.logisticsWages += wages;
-    this.logisticsLabor += labor;
-    this.laborLeft -= labor;
-    this.work += shipped * path.length;
+    for (const { carrier, share } of mix) {
+      const q = shipped * share;
+      const turn = this.carriers[carrier.id];
+      const labor = q * laborPerUnit(path, cfg);
+      const wages = labor * this.state.wage;
+      const revenue = q * this.tariffFor(path, carrier.markup);
+      carrier.cash += revenue - wages;
+      carrier.fuel = Math.max(0, carrier.fuel - q * fuelPerUnit(path, cfg));
+      turn.revenue += revenue;
+      turn.wages += wages;
+      turn.labor += labor;
+      turn.work += q * path.length;
+      this.laborLeft -= labor;
+    }
     for (const e of path.edges) {
       this.capacityLeft[e] = (this.capacityLeft[e] ?? 0) - shipped;
       this.legFlow[e] = (this.legFlow[e] ?? 0) + shipped;
     }
+  }
+
+  /** Сводно по всем перевозчикам. */
+  get logisticsLabor(): number {
+    return this.carriers.private.labor + this.carriers.state.labor;
+  }
+  get logisticsWages(): number {
+    return this.carriers.private.wages + this.carriers.state.wages;
+  }
+  get work(): number {
+    return this.carriers.private.work + this.carriers.state.work;
+  }
+  get logisticsRevenue(): number {
+    return this.carriers.private.revenue + this.carriers.state.revenue;
+  }
+  get logisticsFuelCost(): number {
+    return this.carriers.private.fuelCost + this.carriers.state.fuelCost;
   }
 }
 

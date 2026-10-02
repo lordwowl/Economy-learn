@@ -82,15 +82,32 @@ export interface Route {
   lanes: number;
 }
 
-/** Агрегированный частный перевозчик (GDD 5.17). */
-export interface Logistics {
+export type CarrierId = 'private' | 'state';
+
+/** Перевозчик (GDD 5.17): частный (ИИ) или государственный (строит игрок, возит без наценки). */
+export interface Carrier {
+  id: CarrierId;
+  /** Наценка к себестоимости перевозки. */
+  markup: number;
   cash: number;
+  debt: number;
   /** Запас топлива для перевозок. */
   fuel: number;
-  /** Заявленная работа (груз × длина) за последние ходы, последняя — в конце. */
+  /** Готовые единицы автопарка. */
+  fleet: number;
+  /** Единицы в постройке. */
+  fleetOrdered: number;
+  /** Заявленная этому перевозчику работа (груз × длина) за последние ходы, последняя — в конце. */
   workHistory: number[];
   lastWork: number;
   lastLabor: number;
+  /** Выручка за доставку за прошлый ход. */
+  lastRevenue: number;
+}
+
+export interface Logistics {
+  /** Перевозчики по порядку выбора грузоотправителями: дешёвые первыми. */
+  carriers: Carrier[];
   /** Заявки на перевозку за прошлый ход по участкам (дорога + направление), отдельно для рынка входов и потребительского. */
   requested: Record<TradePhase, Record<string, number>>;
 }
@@ -160,7 +177,8 @@ export type PendingEffect =
   | { type: 'subsidy'; good: GoodId; delta: number }
   | { type: 'roadLane'; route: string }
   | { type: 'firmReady'; firm: string; capacity: number }
-  | { type: 'storageReady'; storage: string };
+  | { type: 'storageReady'; storage: string }
+  | { type: 'fleetReady'; carrier: CarrierId };
 
 export interface Metrics {
   cpi: number;
@@ -233,6 +251,8 @@ export type Action =
   | { type: 'setSubsidy'; good: GoodId; perUnit: number }
   | { type: 'setPriceCeiling'; good: GoodId; price: number | null }
   | { type: 'buildStorage'; building: string; province: string }
+  /** +1 единица госпарка (из бюджета, через buildTurns). */
+  | { type: 'buildStateFleet' }
   /** Закупка в резерв на рынке провинции в этом ходу. */
   | { type: 'reserveBuy'; good: GoodId; province: string; quantity: number }
   /** Интервенция: продажа из резерва на рынке провинции в этом ходу. */

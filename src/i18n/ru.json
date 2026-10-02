@@ -17,5 +17,6 @@
   "building.roadLane": "Полоса дороги",
   "province.north": "Северная провинция",
   "province.center": "Центральная провинция",
-  "province.south": "Южная провинция"
+  "province.south": "Южная провинция",
+  "building.truckFleet": "Автопарк"
 }

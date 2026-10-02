@@ -82,6 +82,16 @@
       "capacityPerLane": 100,
       "costPerLength": 100,
       "buildTurns": 3
+    },
+    {
+      "id": "truckFleet",
+      "kind": "fleet",
+      "nameKey": "building.truckFleet",
+      "shape": "pentagon",
+      "owner": "state",
+      "workCapacity": 600,
+      "cost": 300,
+      "buildTurns": 2
     }
   ]
 }

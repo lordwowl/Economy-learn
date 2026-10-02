@@ -42,8 +42,14 @@ export function borrowForPlan(
   return loan;
 }
 
+/** Заёмщик: фирма или перевозчик. */
+export interface Borrower {
+  cash: number;
+  debt: number;
+}
+
 /** Проценты за ход банку. Если денег не хватает, неоплаченное добавляется к долгу. Возвращает начисленные проценты. */
-export function chargeInterest(firm: Firm, state: WorldState, credit: Balance['credit']): number {
+export function chargeInterest(firm: Borrower, state: WorldState, credit: Balance['credit']): number {
   const interest = firm.debt * annualToMonthly(loanRate(state, credit));
   const paid = Math.min(interest, Math.max(0, firm.cash));
   firm.cash -= paid;
@@ -53,7 +59,7 @@ export function chargeInterest(firm: Firm, state: WorldState, credit: Balance['c
 }
 
 /** Погашение долга деньгами сверх буфера. */
-export function repay(firm: Firm, buffer: number): number {
+export function repay(firm: Borrower, buffer: number): number {
   const amount = Math.max(0, Math.min(firm.debt, firm.cash - buffer));
   firm.cash -= amount;
   firm.debt -= amount;

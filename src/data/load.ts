@@ -90,6 +90,9 @@ function checkReferences(data: GameData, issues: string[]): void {
   if (data.buildings.filter((b) => b.kind === 'route').length !== 1) {
     issues.push('buildings.json: нужно ровно одно здание вида route (полоса дороги)');
   }
+  if (data.buildings.filter((b) => b.kind === 'fleet').length !== 1) {
+    issues.push('buildings.json: нужно ровно одно здание вида fleet (автопарк)');
+  }
   for (const good of Object.keys(data.balance.cpiWeights)) {
     needGood('balance.json: cpiWeights', good);
     if (!(good in data.balance.demand.goods)) {

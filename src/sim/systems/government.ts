@@ -15,6 +15,7 @@ export const BUDGET = {
   subsidies: 'subsidies',
   reserve: 'reserve',
   reserveSales: 'reserveSales',
+  stateCarrier: 'stateCarrier',
   interest: 'interest',
 } as const;
 

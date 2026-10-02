@@ -26,7 +26,7 @@ import { affordableRuns, costPerRun, coverage, feasibleRuns, lossOutputFactor, p
 import { clearMarket } from './market';
 import { freeSpace } from './systems/reserve';
 import { Trade, type TradeBid } from './trade';
-import { mean } from './units';
+import { mean, MONTHS_PER_YEAR } from './units';
 
 export interface StepResult {
   state: WorldState;
@@ -88,6 +88,15 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       const id = `${building.id}-${action.province}-t${turn}`;
       state.reserve.storages.push({ id, building: building.id, province: action.province, ready: false });
       state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'storageReady', storage: id });
+      break;
+    }
+    case 'buildStateFleet': {
+      const fleet = data.buildings.find((b) => b.kind === 'fleet');
+      if (fleet?.kind !== 'fleet') throw new Error('в данных нет автопарка');
+      addSpending(state, BUDGET.construction, fleet.cost);
+      payHouseholds(state, fleet.cost, (p) => p.households.laborForce);
+      state.logistics.carriers.find((c) => c.id === 'state')!.fleetOrdered += 1;
+      state.pending = schedule(state.pending, turn + fleet.buildTurns, { type: 'fleetReady', carrier: 'state' });
       break;
     }
     case 'reserveBuy':
@@ -152,6 +161,11 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       subsidies[effect.good] = (subsidies[effect.good] ?? 0) + effect.delta;
     }
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
+    if (effect.type === 'fleetReady') {
+      const carrier = state.logistics.carriers.find((c) => c.id === effect.carrier)!;
+      carrier.fleet += 1;
+      carrier.fleetOrdered -= 1;
+    }
     if (effect.type === 'storageReady') {
       const storage = state.reserve.storages.find((s) => s.id === effect.storage);
       if (storage) storage.ready = true;
@@ -189,7 +203,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
   let firmLabor = 0;
   for (const firm of state.firms) firmLabor += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
-  const scale = laborScale(firmLabor + state.logistics.lastLabor, laborForce);
+  const carrierLabor = state.logistics.carriers.reduce((s, c) => s + c.lastLabor, 0);
+  const scale = laborScale(firmLabor + carrierLabor, laborForce);
   for (const [id, runs] of plan) plan.set(id, runs * scale);
   const laborRequired = firmLabor * scale;
 
@@ -203,10 +218,18 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const price = Math.min(market.provinces[action.province]?.price ?? market.price, state.government.priceCeilings[action.good] ?? Infinity);
     trade.offerFromReserve(action.good, action.province, Math.min(Math.max(0, action.quantity), stock), price);
   }
+  // Топливо перевозчиков: ожидаемая работа всех перевозчиков делится между ними в порядке выбора
+  // (дешёвые первыми) в пределах парка — так новый госпарк сразу заправляется под свою долю.
   const logisticsCfg = balance.logistics;
-  const expectedWork = mean(state.logistics.workHistory);
-  const fuelTarget = expectedWork * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
-  trade.buyLogisticsFuel(Math.max(0, fuelTarget - state.logistics.fuel));
+  const fleetUnit = data.buildings.find((b) => b.kind === 'fleet');
+  let expectedWork = state.logistics.carriers.reduce((s, c) => s + mean(c.workHistory), 0);
+  for (const carrier of [...state.logistics.carriers].sort((a, b) => a.markup - b.markup || a.id.localeCompare(b.id))) {
+    const capacity = fleetUnit?.kind === 'fleet' ? carrier.fleet * fleetUnit.workCapacity : 0;
+    const mine = Math.min(capacity, expectedWork);
+    expectedWork -= mine;
+    const fuelTarget = mine * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
+    trade.buyCarrierFuel(carrier, fuelTarget - carrier.fuel);
+  }
 
   const firmById = new Map(state.firms.map((f) => [f.id, f]));
   const inputBids = new Map<GoodId, TradeBid[]>();
@@ -399,9 +422,13 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     firm.lastSales = sold;
     firm.ordersHistory = [...firm.ordersHistory, sold + unmetShare].slice(-balance.firms.salesAverageTurns);
   }
-  state.logistics.workHistory = [...state.logistics.workHistory, trade.requestedWork].slice(-balance.firms.salesAverageTurns);
-  state.logistics.lastWork = trade.work;
-  state.logistics.lastLabor = trade.logisticsLabor;
+  for (const carrier of state.logistics.carriers) {
+    const t = trade.carriers[carrier.id];
+    carrier.workHistory = [...carrier.workHistory, t.requestedWork].slice(-balance.firms.salesAverageTurns);
+    carrier.lastWork = t.work;
+    carrier.lastLabor = t.labor;
+    carrier.lastRevenue = t.revenue;
+  }
   state.logistics.requested = trade.requested;
 
   // 6b. Цены рынков: средняя цена сделок в провинции (с доставкой), затем средняя по стране.
@@ -441,15 +468,38 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     if (firm.owner === 'state') addRevenue(state, BUDGET.stateFirms, dividend);
     else payHouseholds(state, dividend, (p) => p.households.population);
   }
-  {
+  // Перевозчики: частный платит проценты, гасит долг, платит дивиденды и расширяет парк; госперевозчик рассчитывается с бюджетом.
+  const fleetBuilding = data.buildings.find((b) => b.kind === 'fleet');
+  for (const carrier of state.logistics.carriers) {
+    if (carrier.id === 'state') {
+      if (carrier.cash >= 0) addRevenue(state, BUDGET.stateCarrier, carrier.cash);
+      else addSpending(state, BUDGET.stateCarrier, -carrier.cash);
+      carrier.cash = 0;
+      continue;
+    }
+    chargeInterest(carrier, state, balance.credit);
     const fuelPrice = state.market[logisticsCfg.fuelGood]?.price ?? 0;
-    const expected = mean(state.logistics.workHistory);
-    const cost = expected * logisticsCfg.fuelPerUnitLength * fuelPrice + state.logistics.lastLabor * state.wage;
-    const dividend = Math.max(0, state.logistics.cash - balance.firms.cashBufferTurns * cost) * balance.firms.dividendPayoutShare;
+    const cost = mean(carrier.workHistory) * logisticsCfg.fuelPerUnitLength * fuelPrice + carrier.lastLabor * state.wage;
+    const buffer = balance.firms.cashBufferTurns * cost;
+    repay(carrier, buffer);
+    const dividend = Math.max(0, carrier.cash - buffer) * balance.firms.dividendPayoutShare;
     if (dividend > 0) {
-      state.logistics.cash -= dividend;
+      carrier.cash -= dividend;
       payHouseholds(state, dividend, (p) => p.households.population);
     }
+    // Расширение парка: загрузка высокая и окупаемость выше ставки кредита → +1 единица в кредит.
+    if (fleetBuilding?.kind !== 'fleet' || carrier.fleetOrdered > 0) continue;
+    const capacity = carrier.fleet * fleetBuilding.workCapacity;
+    const utilization = capacity > 0 ? mean(carrier.workHistory) / capacity : 1;
+    const revenuePerWork = carrier.lastWork > 0 ? carrier.lastRevenue / carrier.lastWork : 0;
+    const monthlyProfit = fleetBuilding.workCapacity * revenuePerWork * (carrier.markup / (1 + carrier.markup));
+    const roi = fleetBuilding.cost > 0 ? (monthlyProfit * MONTHS_PER_YEAR) / fleetBuilding.cost : Infinity;
+    if (utilization < balance.credit.entryMinUtilization) continue;
+    if (roi <= loanRate(state, balance.credit) + balance.credit.expansionRoiMargin) continue;
+    carrier.debt += fleetBuilding.cost;
+    carrier.fleetOrdered += 1;
+    payHouseholds(state, fleetBuilding.cost, (p) => p.households.laborForce);
+    state.pending = schedule(state.pending, turn + fleetBuilding.buildTurns, { type: 'fleetReady', carrier: carrier.id });
   }
 
   // 6d. Закрытие: частная фирма после N месяцев убытков подряд. Долг гасится остатком денег, остальное банк списывает.

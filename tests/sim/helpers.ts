@@ -37,7 +37,8 @@ export function run(
 
 export function totalMoney(state: WorldState): number {
   // Кредит создаёт деньги вместе с долгом, поэтому сохраняется «деньги − долги (+ списанные долги)».
-  let total = state.government.cash + state.logistics.cash + state.bank.cash - state.government.debt - state.bank.writtenOff;
+  let total = state.government.cash + state.bank.cash - state.government.debt - state.bank.writtenOff;
+  for (const c of state.logistics.carriers) total += c.cash - c.debt;
   for (const p of state.provinces) total += p.households.cash - p.households.debt;
   for (const f of state.firms) total += f.cash - f.debt;
   return total;

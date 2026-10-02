@@ -79,10 +79,20 @@ export const routeBuildingSchema = z.strictObject({
   costPerLength: nonNegative,
 });
 
+/** Единица автопарка перевозчика: сколько работы (груз × длина) за ход она даёт. */
+export const fleetBuildingSchema = z.strictObject({
+  ...buildingBase,
+  kind: z.literal('fleet'),
+  shape: z.literal('pentagon'),
+  workCapacity: positive,
+  cost: nonNegative,
+});
+
 export const buildingSchema = z.discriminatedUnion('kind', [
   producerBuildingSchema,
   storageBuildingSchema,
   routeBuildingSchema,
+  fleetBuildingSchema,
 ]);
 
 export const buildingsFileSchema = z.strictObject({
@@ -271,6 +281,11 @@ export const scenarioSchema = z.strictObject({
     storages: z.array(z.strictObject({ building: id, province: id })),
     stock: z.array(z.strictObject({ province: id, good: id, quantity: positive })),
   }),
+  /** Автопарки перевозчиков в единицах truckFleet; "auto" — столько, чтобы стартовые перевозки загружали парк не выше entryMinUtilization. */
+  fleet: z.strictObject({
+    private: z.union([z.number().int().nonnegative(), z.literal('auto')]),
+    state: z.number().int().nonnegative(),
+  }),
   /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
   routes: z.array(
     z.strictObject({
@@ -291,4 +306,5 @@ export type Building = z.infer<typeof buildingSchema>;
 export type ProducerBuilding = z.infer<typeof producerBuildingSchema>;
 export type StorageBuilding = z.infer<typeof storageBuildingSchema>;
 export type RouteBuilding = z.infer<typeof routeBuildingSchema>;
+export type FleetBuilding = z.infer<typeof fleetBuildingSchema>;
 export type Balance = z.infer<typeof balanceSchema>;

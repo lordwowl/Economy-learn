@@ -98,6 +98,10 @@
       "lanes": 0
     }
   ],
+  "fleet": {
+    "private": "auto",
+    "state": 0
+  },
   "reserve": {
     "storages": [],
     "stock": []
