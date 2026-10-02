@@ -21,8 +21,9 @@ import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget 
 import { nextExpectations } from './systems/expectations';
 import { laborScale, nextWage, unemploymentRate } from './systems/labor';
 import { legKey, routeCapacity } from './systems/logistics';
-import { nextMarkup, nextPriceBreakdown, unitCostBreakdown } from './systems/pricing';
-import { affordableRuns, costPerRun, coverage, feasibleRuns, plannedRuns } from './systems/production';
+import { nextMarkup, nextPriceBreakdown, unitCostBreakdown, withCeiling, withoutCeiling } from './systems/pricing';
+import { affordableRuns, costPerRun, coverage, feasibleRuns, lossOutputFactor, plannedRuns } from './systems/production';
+import { clearMarket } from './market';
 import { Trade, type TradeBid } from './trade';
 import { mean } from './units';
 
@@ -65,6 +66,18 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
     case 'setTransfers':
       state.government.transfersPerCapita = action.perCapita;
       break;
+    case 'setPriceCeiling': {
+      const ceilings = state.government.priceCeilings;
+      if (action.price === null) delete ceilings[action.good];
+      else ceilings[action.good] = action.price;
+      // Потолок действует сразу: цены производителей срезаются уже в этом ходу.
+      for (const firm of state.firms) {
+        if (data.recipes.find((r) => r.id === firm.recipe)?.output.good !== action.good) continue;
+        firm.breakdown = withCeiling(firm.breakdown, ceilings[action.good]);
+        firm.price = sumBreakdown(firm.breakdown);
+      }
+      break;
+    }
     case 'setSubsidy': {
       const g = state.government;
       const delta = action.perUnit - (g.announcedSubsidies[action.good] ?? 0);
@@ -137,7 +150,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
     const prices = localPrices(firm.province);
-    const planned = plannedRuns(firm, recipe, balance.firms);
+    const unitCost = costPerRun(recipe, prices, state.wage) / recipe.output.amount;
+    const netPrice =
+      firm.price * (1 - state.government.taxes.sales) + (state.government.subsidies[recipe.output.good] ?? 0);
+    const planned = plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms);
     if (planned > affordableRuns(firm, recipe, prices, state.wage)) {
       borrowForPlan(firm, recipe, planned, prices, state.wage, state.government.taxes.sales, balance.credit);
     }
@@ -231,11 +247,60 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     }
   }
   let householdSpending = 0;
+  const blackMarket: Record<GoodId, { quantity: number; price: number }> = {};
+  /**
+   * Чёрный рынок провинции: долю неудовлетворённого спроса население докупает у придержавших товар фирм
+   * по P_bm = потолок × (1 + k × дефицит). Возвращает, сколько куплено.
+   */
+  const blackMarketSales = (good: GoodId, result: { demandedByProvince: Record<string, number>; unmetByProvince: Record<string, number> }): number => {
+    const ceiling = ceilings[good];
+    if (ceiling === undefined) return 0;
+    let total = 0;
+    let value = 0;
+    for (const province of state.provinces) {
+      const demanded = result.demandedByProvince[province.id] ?? 0;
+      const unmet = result.unmetByProvince[province.id] ?? 0;
+      const sellers = state.firms.filter((f) => f.province === province.id && (heldBack.get(f.id) ?? 0) > 0 && outputOf(f) === good);
+      if (demanded <= 0 || unmet <= 0 || sellers.length === 0) continue;
+      const price = ceiling * (1 + balance.priceCeiling.blackMarketPremiumPerShortage * (unmet / demanded));
+      const want = unmet * balance.priceCeiling.blackMarketShareOfUnmet;
+      const buyer = householdId(province.id);
+      const r = clearMarket(
+        sellers.map((f) => ({ seller: f.id, price, quantity: heldBack.get(f.id) ?? 0 })),
+        [{ buyer, quantity: want, budget: Math.min(Math.max(0, province.households.cash), want * price) }],
+      );
+      for (const f of sellers) {
+        const q = r.sold.get(f.id) ?? 0;
+        trade.sellBlack(f, good, q, province.id, price);
+        heldBack.set(f.id, (heldBack.get(f.id) ?? 0) - q);
+      }
+      const paid = r.paid.get(buyer) ?? 0;
+      province.households.cash -= paid;
+      householdSpending += paid;
+      total += r.quantity;
+      value += paid;
+    }
+    if (total > 0) blackMarket[good] = { quantity: total, price: value / total };
+    return total;
+  };
   const householdDemand: Record<GoodId, number> = {};
   const householdPurchases: Record<GoodId, number> = {};
   const shortage: Record<GoodId, number> = {};
   const provinceShortage: Record<string, Record<GoodId, number>> = {};
   for (const p of state.provinces) provinceShortage[p.id] = {};
+  // Под потолком фирмы придерживают часть склада для чёрного рынка — тем больше, чем сильнее был дефицит.
+  const ceilings = state.government.priceCeilings;
+  const heldBack = new Map<string, number>();
+  for (const firm of state.firms) {
+    const good = outputOf(firm);
+    if (ceilings[good] === undefined) continue;
+    const lastShortage = prev.metrics.provinceShortage[firm.province]?.[good] ?? 0;
+    const q = (firm.inventory[good] ?? 0) * balance.priceCeiling.blackMarketShareOfUnmet * lastShortage;
+    if (q <= 0) continue;
+    firm.inventory[good] = (firm.inventory[good] ?? 0) - q;
+    heldBack.set(firm.id, q);
+  }
+
   const consumerOutcomes = trade.tradePhase('consumer', consumerBids);
   for (const good of Object.keys(balance.demand.goods)) {
     const result = consumerOutcomes.get(good);
@@ -256,8 +321,12 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       provinceShortage[province.id]![good] = d > 0 ? u / d : 0;
     }
     householdDemand[good] = demanded;
-    householdPurchases[good] = purchased;
+    householdPurchases[good] = purchased + blackMarketSales(good, result);
     shortage[good] = demanded > 0 ? unmet / demanded : 0;
+  }
+  for (const firm of state.firms) {
+    const q = heldBack.get(firm.id) ?? 0;
+    if (q > 0) firm.inventory[outputOf(firm)] = (firm.inventory[outputOf(firm)] ?? 0) + q;
   }
   payWages(state, trade.logisticsWages);
   const employment = productionLabor + trade.logisticsLabor;
@@ -410,8 +479,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       if (m) inputs[input.good] = m.provinces[firm.province] ?? m;
     }
     const unitCost = unitCostBreakdown(recipe, inputs, state.wage);
-    const breakdown = nextPriceBreakdown(
-      firm.breakdown,
+    const own = nextPriceBreakdown(
+      withoutCeiling(firm.breakdown),
       unitCost,
       firm.markup,
       state.government.taxes.sales,
@@ -419,6 +488,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       expected,
       balance.firms,
     );
+    const breakdown = withCeiling(own, state.government.priceCeilings[recipe.output.good]);
     causes.push(breakdownChange(turn, `price.firm.${firm.id}`, firm.breakdown, breakdown));
     firm.breakdown = breakdown;
     firm.price = sumBreakdown(breakdown);
@@ -483,6 +553,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     logisticsWork: trade.work,
     gdp,
     budgetBalance: budgetEvent.delta,
+    blackMarket,
     firmsOpened,
     firmsClosed,
   };

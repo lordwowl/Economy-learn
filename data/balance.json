@@ -10,6 +10,7 @@
     "markupAdjustSpeed": 0.1,
     "priceStickiness": 0.4,
     "expectedInflationPassThrough": 0.5,
+    "lossOutputCut": 3.0,
     "cashBufferTurns": 2,
     "dividendPayoutShare": 1.0,
     "closeAfterLossTurns": 6

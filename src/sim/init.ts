@@ -360,6 +360,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     logisticsWork: plan.work,
     gdp,
     budgetBalance: 0,
+    blackMarket: {},
     firmsOpened: [],
     firmsClosed: [],
   };
@@ -382,6 +383,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       transfersPerCapita,
       subsidies: {},
       announcedSubsidies: {},
+      priceCeilings: {},
       revenue: {},
       spending: {},
     },

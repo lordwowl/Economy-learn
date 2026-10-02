@@ -211,6 +211,19 @@ export class Trade {
     return outcomes;
   }
 
+  /** Продажа «из-под полы»: товар уже отложен со склада, налога нет, премия к официальной цене — компонента blackMarket. */
+  sellBlack(firm: Firm, good: GoodId, quantity: number, province: string, price: number): void {
+    if (quantity <= 0) return;
+    firm.cash += quantity * price;
+    add(this.soldByFirm, firm.id, quantity);
+    add(this.revenue, firm.id, quantity * price);
+    const byProvince = (this.tallies[good] ??= {});
+    const tally = (byProvince[province] ??= { quantity: 0, weighted: {} });
+    tally.quantity += quantity;
+    for (const [ref, v] of Object.entries(firm.breakdown)) tally.weighted[ref] = (tally.weighted[ref] ?? 0) + quantity * v;
+    tally.weighted[COMPONENT.blackMarket] = (tally.weighted[COMPONENT.blackMarket] ?? 0) + quantity * (price - firm.price);
+  }
+
   private offers(firms: readonly Firm[], good: GoodId): Offer[] {
     return firms.map((f) => ({ seller: f.id, price: f.price, quantity: f.inventory[good] ?? 0 }));
   }

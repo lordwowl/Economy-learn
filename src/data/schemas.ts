@@ -128,6 +128,8 @@ export const balanceSchema = z.strictObject({
       priceStickiness: share,
       /** γ — доля ожидаемой инфляции, закладываемая в цену. */
       expectedInflationPassThrough: share,
+      /** Если чистая выручка за единицу ниже себестоимости, выпуск × (1 − lossOutputCut × доля убытка). */
+      lossOutputCut: nonNegative,
       /** Сколько месяцев издержек фирма держит на счёте; остальное — дивиденды. */
       cashBufferTurns: nonNegative,
       /** Доля избытка денег сверх буфера, выплачиваемая владельцам за ход. */

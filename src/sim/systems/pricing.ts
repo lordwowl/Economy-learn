@@ -21,6 +21,8 @@ export const COMPONENT = {
   logistics: 'logistics',
   salesTax: 'tax.sales',
   subsidy: 'subsidy',
+  priceCeiling: 'priceCeiling',
+  blackMarket: 'blackMarket',
   markup: 'markup',
   expectations: 'expectations',
 } as const;
@@ -82,4 +84,19 @@ export function nextPriceBreakdown(
   next[COMPONENT.expectations] =
     (next[COMPONENT.expectations] ?? 0) + firms.expectedInflationPassThrough * expectedInflation * price;
   return next;
+}
+
+/** Собственная («расчётная») цена фирмы без среза потолком. */
+export function withoutCeiling(breakdown: Breakdown): Breakdown {
+  const { [COMPONENT.priceCeiling]: _cut, ...rest } = breakdown;
+  return rest;
+}
+
+/** Цена с потолком: если расчётная выше потолка, срез — отрицательная компонента priceCeiling. Σ = min(расчётная, потолок). */
+export function withCeiling(breakdown: Breakdown, ceiling: number | undefined): Breakdown {
+  const own = withoutCeiling(breakdown);
+  if (ceiling === undefined) return own;
+  let price = 0;
+  for (const v of Object.values(own)) price += v;
+  return price > ceiling ? { ...own, [COMPONENT.priceCeiling]: ceiling - price } : own;
 }

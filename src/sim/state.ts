@@ -119,6 +119,8 @@ export interface Government {
   subsidies: Record<GoodId, number>;
   /** Объявленная игроком субсидия. */
   announcedSubsidies: Record<GoodId, number>;
+  /** Потолки цен по товарам (на все продажи производителей, во всех провинциях). */
+  priceCeilings: Record<GoodId, number>;
   /** Доходы за прошлый ход по статьям: tax.sales, tax.profit, tax.income, stateFirms. */
   revenue: Breakdown;
   /** Расходы за прошлый ход по статьям: transfers, construction, interest, subsidies. */
@@ -162,6 +164,8 @@ export interface Metrics {
   gdp: number;
   /** Сальдо бюджета за ход: доходы − расходы. */
   budgetBalance: number;
+  /** Чёрный рынок за ход: продано и средняя цена (только для товаров с потолком). */
+  blackMarket: Record<GoodId, { quantity: number; price: number }>;
   /** Фирмы, о стройке которых решили в этот ход. */
   firmsOpened: string[];
   /** Фирмы, закрывшиеся в этот ход. */
@@ -204,4 +208,5 @@ export type Action =
   | { type: 'addRoadLane'; route: string }
   | { type: 'setTax'; tax: TaxKind; rate: number }
   | { type: 'setTransfers'; perCapita: number }
-  | { type: 'setSubsidy'; good: GoodId; perUnit: number };
+  | { type: 'setSubsidy'; good: GoodId; perUnit: number }
+  | { type: 'setPriceCeiling'; good: GoodId; price: number | null };
