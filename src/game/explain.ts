@@ -117,7 +117,11 @@ export interface WhyLine {
   share: number;
 }
 
-export function causeLine(metric: string, cause: Cause, ctx: ExplainContext): WhyLine {
+/**
+ * Строка причины. share — доля причины в общем движении: |вклад| / Σ|вкладов|, всегда 0–100%.
+ * (Доля в изменении value / delta бывает больше 100%, когда причины гасят друг друга, — «трансферты 2142%» непонятны.)
+ */
+export function causeLine(metric: string, cause: Cause, ctx: ExplainContext, totalMovement = Math.abs(cause.value)): WhyLine {
   const direction = cause.value >= 0 ? 'up' : 'down';
   const group = findMetric(metric)?.group;
   const found = group ? findCause(group, cause.ref) : undefined;
@@ -127,13 +131,14 @@ export function causeLine(metric: string, cause: Cause, ctx: ExplainContext): Wh
     direction,
     text: key ? render(key, found!.params, ctx) : cause.ref,
     value: cause.value,
-    share: cause.share,
+    share: totalMovement > 0 ? cause.value / totalMovement : 0,
   };
 }
 
 /** Кнопка «Почему?»: главные причины изменения метрики (по абсолютному вкладу). */
 export function why(event: CauseEvent, ctx: ExplainContext, max = 3): WhyLine[] {
-  return event.causes.slice(0, max).map((c) => causeLine(event.metric, c, ctx));
+  const movement = event.causes.reduce((sum, c) => sum + Math.abs(c.value), 0);
+  return event.causes.slice(0, max).map((c) => causeLine(event.metric, c, ctx, movement));
 }
 
 /** Строка для журнала: «▲ Подорожал вход «Мука» — 62%». */
