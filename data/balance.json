@@ -111,6 +111,13 @@
       "full": 3
     }
   },
+  "catastrophe": {
+    "famineGood": "bread",
+    "famineShortage": 0.5,
+    "famineTurns": 2,
+    "defaultDebtToAnnualGdp": 1.0,
+    "minTrust": 0
+  },
   "government": {
     "debtRatePremium": 0.5
   }

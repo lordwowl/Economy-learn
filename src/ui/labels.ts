@@ -1,8 +1,10 @@
 // Тексты для решений, «в пути» и сводки — из ru.json.
 
-import type { GameData } from '../data';
+import type { Balance, GameData, GoalCondition } from '../data';
 import { deficitLevel, deficitMark } from '../render/model';
-import { formatWhyLine } from '../game/explain';
+import { causeLine, formatWhyLine, metricLabel, type ExplainContext } from '../game/explain';
+import type { Defeat, GoalStatus } from '../game/level';
+import type { ChainLink } from '../game/report';
 import type { PendingItem } from '../game/pending';
 import type { SummaryItem } from '../game/summary';
 import { t, translate } from '../i18n';
@@ -70,7 +72,7 @@ export function describePending(item: PendingItem, state: WorldState): string {
     case 'creditRate':
       return t(item.kind === 'demandRate' ? 'pending.demandRate' : 'pending.creditRate', { amount: signed(item.amount * 100), turns });
     case 'subsidy':
-      return t('pending.subsidy', { good: goodName(target), amount: signedMoney(item.amount, 2), turns });
+      return t('pending.subsidy', { good: goodName(target), amount: signedMoney(item.amount), turns });
     case 'roadLane':
       return t('pending.roadLane', { route: routeName(state, target), turns });
     case 'firm':
@@ -89,13 +91,22 @@ export function describeSummary(item: SummaryItem, state: WorldState): string {
     case 'unemployment':
       return t('summary.unemployment', { arrow: arrow(item.change), change: signed(item.change * 100), value: pct(item.value) });
     case 'price':
-      return t('summary.price', { good: goodName(item.target ?? ''), arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value) });
+      return t('summary.price', {
+        good: goodName(item.target ?? ''),
+        arrow: arrow(item.change),
+        change: signed(item.change * 100) + '%',
+        value: money(item.value),
+      });
     case 'wage':
       return t('summary.wage', { arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value) });
     case 'budget':
       return t('summary.budget', { change: signedMoney(item.change), value: money(item.value) });
     case 'deficit':
-      return t('summary.deficit', { province: provinceName(state, item.target ?? ''), marks: deficitMark(deficitLevel(item.value)), value: pct(item.value, 0) });
+      return t('summary.deficit', {
+        province: provinceName(state, item.target ?? ''),
+        marks: deficitMark(deficitLevel(item.value)),
+        value: pct(item.value, 0),
+      });
     case 'firmsOpened':
       return t('summary.firmsOpened', { change: item.change });
     case 'firmsClosed':
@@ -104,3 +115,91 @@ export function describeSummary(item: SummaryItem, state: WorldState): string {
 }
 
 export const whyText = formatWhyLine;
+
+/** Доля в процентах: целые — без дробной части, иначе одна цифра. */
+function share(value: number): string {
+  const percent = value * 100;
+  return pct(value, Math.abs(percent - Math.round(percent)) < 1e-9 ? 0 : 1);
+}
+
+const SHARE_METRICS = new Set(['unemployment', 'inflationYoY', 'debtToGdp', 'shortage', 'maxShortage']);
+
+/** Значение показателя цели в его единицах: доли — в %, ИПЦ — числом, остальное — в колосах. */
+export function goalValue(metric: string, value: number): string {
+  const kind = metric.split('.')[0]!;
+  if (SHARE_METRICS.has(kind)) return share(value);
+  if (kind === 'cpi') return num(value, 1);
+  if (kind === 'budgetBalance') return signedMoney(value);
+  return money(value);
+}
+
+export function goalMetricName(metric: string): string {
+  const [kind, good] = metric.split('.');
+  return translate(`goal.metric.${kind}`, good !== undefined ? { good: goodName(good) } : {});
+}
+
+export function describeGoal(condition: GoalCondition): string {
+  if (condition.kind === 'noDecision') return translate(`goal.noDecision.${condition.decision}`);
+  const params = {
+    metric: goalMetricName(condition.metric),
+    op: t(condition.op === '<=' ? 'goal.op.le' : 'goal.op.ge'),
+    value: goalValue(condition.metric, condition.value),
+    from: condition.from ?? 1,
+    turns: condition.turns ?? 1,
+  };
+  switch (condition.when) {
+    case 'end':
+      return t('goal.end', params);
+    case 'always':
+      return t(condition.from !== undefined && condition.from > 1 ? 'goal.alwaysFrom' : 'goal.always', params);
+    case 'streak':
+      return t('goal.streak', params);
+  }
+}
+
+/** «✓ выполнено · сейчас 104,7». */
+export function describeGoalStatus(status: GoalStatus): string {
+  const parts = [translate(`goal.state.${status.state}`)];
+  if (status.condition.kind === 'metric' && status.value !== undefined) {
+    parts.push(t('goal.now', { value: goalValue(status.condition.metric, status.value) }));
+  }
+  if (status.streak !== undefined && status.state === 'pending') parts.push(t('goal.streakNow', { streak: status.streak }));
+  return parts.join(' · ');
+}
+
+export function describeDefeat(defeat: Defeat, state: WorldState, balance: Balance): string {
+  const c = balance.catastrophe;
+  switch (defeat.reason) {
+    case 'famine':
+      return t('report.defeat.famine', {
+        province: provinceName(state, defeat.province),
+        good: goodName(c.famineGood),
+        share: share(c.famineShortage),
+        turns: c.famineTurns,
+        turn: defeat.turn,
+      });
+    case 'default':
+      return t('report.defeat.default', { share: share(c.defaultDebtToAnnualGdp), turn: defeat.turn });
+    case 'trust':
+      return t('report.defeat.trust', { turn: defeat.turn });
+  }
+}
+
+/** Изменение метрики журнала за уровень в понятных единицах: ИПЦ — в пунктах, цены и зарплата — в %, безработица — в п.п. */
+export function chainChange(metric: string, value: number, start: WorldState): string {
+  const relative = (base: number | undefined) => (base ? `${signed((value / base) * 100)}%` : signed(value, 2));
+  if (metric === 'cpi') return t('report.points', { value: signed(value) });
+  if (metric === 'unemployment') return t('report.pp', { value: signed(value * 100) });
+  if (metric === 'budget.balance') return signedMoney(value);
+  if (metric === 'wage') return relative(start.wage);
+  if (metric.startsWith('price.')) return relative(start.market[metric.split('.')[1]!]?.price);
+  return signed(value, 2);
+}
+
+/** Звено цепочки: «Цена «Хлеб» ▲ +31,6%» и «Главная причина: Фирмы подняли наценку (+24,7%)». */
+export function describeChainLink(link: ChainLink, start: WorldState, ctx: ExplainContext): { title: string; cause: string } {
+  return {
+    title: `${metricLabel(link.metric, ctx)} ${arrow(link.delta)} ${chainChange(link.metric, link.delta, start)}`,
+    cause: t('report.mainCause', { cause: causeLine(link.metric, link.cause, ctx).text, value: chainChange(link.metric, link.cause.value, start) }),
+  };
+}

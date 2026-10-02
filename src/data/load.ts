@@ -3,12 +3,14 @@ import {
   balanceSchema,
   scenarioSchema,
   buildingsFileSchema,
+  levelSchema,
   goodsFileSchema,
   recipesFileSchema,
   shocksFileSchema,
   type Balance,
   type Building,
   type Good,
+  type Level,
   type Recipe,
   type Scenario,
   type Shock,
@@ -99,6 +101,7 @@ function checkReferences(data: GameData, issues: string[]): void {
 
   for (const good of Object.keys(data.balance.demand.goods)) needGood('balance.json: demand.goods', good);
   needGood('balance.json: logistics.fuelGood', data.balance.logistics.fuelGood);
+  needGood('balance.json: catastrophe.famineGood', data.balance.catastrophe.famineGood);
   if (data.buildings.filter((b) => b.kind === 'route').length !== 1) {
     issues.push('buildings.json: нужно ровно одно здание вида route (полоса дороги)');
   }
@@ -186,4 +189,37 @@ export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): S
   }
   if (issues.length > 0) throw new GameDataError(issues);
   return scenario;
+}
+
+/** Валидирует уровень: ссылки на сценарий, шоки, здания и товары, сроки событий и целей. */
+export function loadLevel(raw: unknown, data: GameData, scenarios: Readonly<Record<string, Scenario>>, file = 'level'): Level {
+  const issues: string[] = [];
+  const level = parseFile(file, levelSchema, raw, issues);
+  if (!level) throw new GameDataError(issues);
+
+  if (!scenarios[level.scenario]) issues.push(`${file}: неизвестный сценарий "${level.scenario}"`);
+  const goodIds = new Set(data.goods.map((g) => g.id));
+  const buildable = new Set(data.buildings.filter((b) => b.kind !== 'producer').map((b) => b.id));
+  for (const b of level.buildings) {
+    if (!buildable.has(b)) issues.push(`${file}: "${b}" нельзя строить игроку (нет в buildings.json или это производство)`);
+  }
+  for (const e of level.events) {
+    if (!data.shocks.some((s) => s.id === e.shock)) issues.push(`${file}: неизвестный шок "${e.shock}"`);
+    if (e.turn > level.turns) issues.push(`${file}: шок "${e.shock}" на ходу ${e.turn} — позже конца уровня (${level.turns})`);
+  }
+  checkUniqueIds(file, level.goals, issues);
+  for (const star of [1, 2, 3]) {
+    if (!level.goals.some((g) => g.star === star)) issues.push(`${file}: нет ни одной цели на звезду ${star}`);
+  }
+  for (const goal of level.goals) {
+    const c = goal.condition;
+    if (c.kind !== 'metric') continue;
+    const good = /^(?:shortage|maxShortage|price)\.(.+)$/.exec(c.metric)?.[1];
+    if (good !== undefined && !goodIds.has(good)) issues.push(`${file}: цель ${goal.id}: неизвестный товар "${good}"`);
+    if (c.when === 'streak' && c.turns === undefined) issues.push(`${file}: цель ${goal.id}: для streak нужно turns`);
+    if (c.when !== 'streak' && c.turns !== undefined) issues.push(`${file}: цель ${goal.id}: turns только для streak`);
+    if ((c.from ?? 1) + (c.turns ?? 1) - 1 > level.turns) issues.push(`${file}: цель ${goal.id}: не помещается в срок уровня`);
+  }
+  if (issues.length > 0) throw new GameDataError(issues);
+  return level;
 }

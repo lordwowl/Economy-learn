@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { useEffect } from 'preact/hooks';
 import { t } from '../i18n';
 
 interface StepperProps {
@@ -45,6 +46,13 @@ export function Section({ title, hint, children }: { title: string; hint?: strin
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ComponentChildren }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div class="modal" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div class="modal__card" onClick={(e) => e.stopPropagation()}>

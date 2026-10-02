@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import type { GameData } from '../data';
+import { LEVERS, type GameData, type Lever } from '../data';
 import { decisionKey } from '../game/session';
 import { t, translate } from '../i18n';
 import type { Action, TaxKind, WorldState } from '../sim';
@@ -21,9 +21,12 @@ interface Props {
   data: GameData;
   decisions: readonly Action[];
   onDecide: (action: Action) => void;
+  /** Открытые на уровне рычаги (по умолчанию — все). */
+  levers?: readonly Lever[];
 }
 
-export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
+export function PolicyPanel({ state, data, decisions, onDecide, levers = LEVERS }: Props) {
+  const open = (lever: Lever) => levers.includes(lever);
   const decided = <A extends Action>(key: string) => decisions.find((d) => decisionKey(d) === key) as A | undefined;
   const g = state.government;
   const goods = data.goods.map((x) => x.id);
@@ -34,116 +37,125 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
 
   return (
     <div class="panel">
-      <Section title={t('policy.keyRate')} hint={t('policy.keyRateHint')}>
-        <Stepper
-          label={t('policy.keyRate')}
-          value={keyRate}
-          current={state.keyRate}
-          {...RATE}
-          format={(v) => pct(v)}
-          onChange={(rate) => onDecide({ type: 'setKeyRate', rate })}
-        />
-      </Section>
+      {open('keyRate') && (
+        <Section title={t('policy.keyRate')} hint={t('policy.keyRateHint')}>
+          <Stepper
+            label={t('policy.keyRate')}
+            value={keyRate}
+            current={state.keyRate}
+            {...RATE}
+            format={(v) => pct(v)}
+            onChange={(rate) => onDecide({ type: 'setKeyRate', rate })}
+          />
+        </Section>
+      )}
 
-      <Section title={t('policy.taxes')}>
-        <div class="grid">
-          {TAXES.map((tax) => (
-            <Stepper
-              key={tax}
-              label={translate(`policy.tax.${tax}`)}
-              value={decided<Extract<Action, { type: 'setTax' }>>(`tax.${tax}`)?.rate ?? g.taxes[tax]}
-              current={g.taxes[tax]}
-              {...TAX}
-              format={(v) => pct(v, 0)}
-              onChange={(rate) => onDecide({ type: 'setTax', tax, rate })}
-            />
-          ))}
-        </div>
-      </Section>
-
-      <Section title={t('policy.transfers')}>
-        <Stepper
-          label={t('policy.transfers')}
-          value={transfers}
-          current={g.transfersPerCapita}
-          {...TRANSFERS}
-          format={(v) => money(v)}
-          onChange={(perCapita) => onDecide({ type: 'setTransfers', perCapita })}
-        />
-      </Section>
-
-      <Section title={t('policy.subsidies')} hint={t('policy.subsidyHint')}>
-        <div class="grid">
-          {goods.map((good) => {
-            const announced = g.announcedSubsidies[good] ?? 0;
-            return (
+      {open('taxes') && (
+        <Section title={t('policy.taxes')}>
+          <div class="grid">
+            {TAXES.map((tax) => (
               <Stepper
-                key={good}
-                label={goodName(good)}
-                value={decided<Extract<Action, { type: 'setSubsidy' }>>(`subsidy.${good}`)?.perUnit ?? announced}
-                current={announced}
-                {...SUBSIDY}
-                format={(v) => money(v)}
-                onChange={(perUnit) => onDecide({ type: 'setSubsidy', good, perUnit })}
+                key={tax}
+                label={translate(`policy.tax.${tax}`)}
+                value={decided<Extract<Action, { type: 'setTax' }>>(`tax.${tax}`)?.rate ?? g.taxes[tax]}
+                current={g.taxes[tax]}
+                {...TAX}
+                format={(v) => pct(v, 0)}
+                onChange={(rate) => onDecide({ type: 'setTax', tax, rate })}
               />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {open('transfers') && (
+        <Section title={t('policy.transfers')}>
+          <Stepper
+            label={t('policy.transfers')}
+            value={transfers}
+            current={g.transfersPerCapita}
+            {...TRANSFERS}
+            format={(v) => money(v)}
+            onChange={(perCapita) => onDecide({ type: 'setTransfers', perCapita })}
+          />
+        </Section>
+      )}
+
+      {open('subsidies') && (
+        <Section title={t('policy.subsidies')} hint={t('policy.subsidyHint')}>
+          <div class="grid">
+            {goods.map((good) => {
+              const announced = g.announcedSubsidies[good] ?? 0;
+              return (
+                <Stepper
+                  key={good}
+                  label={goodName(good)}
+                  value={decided<Extract<Action, { type: 'setSubsidy' }>>(`subsidy.${good}`)?.perUnit ?? announced}
+                  current={announced}
+                  {...SUBSIDY}
+                  format={(v) => money(v)}
+                  onChange={(perUnit) => onDecide({ type: 'setSubsidy', good, perUnit })}
+                />
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      {open('priceCeilings') && (
+        <Section title={t('policy.ceilings')} hint={t('policy.ceilingHint')}>
+          {consumerGoods.map((good) => {
+            const now = g.priceCeilings[good];
+            const pending = decided<Extract<Action, { type: 'setPriceCeiling' }>>(`ceiling.${good}`);
+            const value = pending ? pending.price : (now ?? null);
+            const price = state.market[good]?.price ?? 0;
+            return (
+              <div class="ceiling" key={good}>
+                {value === null ? (
+                  <div class="ceiling__off">
+                    <span>
+                      {goodName(good)}: {t('policy.ceilingOff')}
+                    </span>
+                    <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: Math.round(price * CEILING.share) })}>
+                      {t('policy.ceilingSet')}
+                    </button>
+                  </div>
+                ) : (
+                  <div class="ceiling__on">
+                    <Stepper
+                      label={goodName(good)}
+                      value={value}
+                      {...(now !== undefined ? { current: now } : {})}
+                      step={Math.max(1, Math.round(price * CEILING.stepShare))}
+                      min={1}
+                      max={price * 3}
+                      format={(v) => money(v)}
+                      onChange={(p) => onDecide({ type: 'setPriceCeiling', good, price: p })}
+                    />
+                    <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: null })}>
+                      {t('policy.ceilingRemove')}
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
-        </div>
-      </Section>
+        </Section>
+      )}
 
-      <Section title={t('policy.ceilings')} hint={t('policy.ceilingHint')}>
-        {consumerGoods.map((good) => {
-          const now = g.priceCeilings[good];
-          const pending = decided<Extract<Action, { type: 'setPriceCeiling' }>>(`ceiling.${good}`);
-          const value = pending ? pending.price : (now ?? null);
-          const price = state.market[good]?.price ?? 0;
-          return (
-            <div class="ceiling" key={good}>
-              {value === null ? (
-                <div class="ceiling__off">
-                  <span>
-                    {goodName(good)}: {t('policy.ceilingOff')}
-                  </span>
-                  <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: Math.round(price * CEILING.share) })}>
-                    {t('policy.ceilingSet')}
-                  </button>
-                </div>
-              ) : (
-                <div class="ceiling__on">
-                  <Stepper
-                    label={goodName(good)}
-                    value={value}
-                    {...(now !== undefined ? { current: now } : {})}
-                    step={Math.max(1, Math.round(price * CEILING.stepShare))}
-                    min={1}
-                    max={price * 3}
-                    format={(v) => money(v)}
-                    onChange={(p) => onDecide({ type: 'setPriceCeiling', good, price: p })}
-                  />
-                  <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: null })}>
-                    {t('policy.ceilingRemove')}
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </Section>
-
-      <ReservePolicy state={state} data={data} onDecide={onDecide} />
+      {open('reserve') && <ReservePolicy state={state} data={data} onDecide={onDecide} />}
+      {levers.length === 0 && <p class="section__hint">{t('policy.closed')}</p>}
     </div>
   );
 }
 
-function ReservePolicy({ state, data, onDecide }: Omit<Props, 'decisions'>) {
+function ReservePolicy({ state, data, onDecide }: Omit<Props, 'decisions' | 'levers'>) {
   const [quantity, setQuantity] = useState(100);
   const provinces = state.provinces.filter((p) => state.reserve.storages.some((s) => s.ready && s.province === p.id));
   return (
     <Section title={t('policy.reserve')}>
       {provinces.length === 0 && <p class="section__hint">{t('policy.reserveEmpty')}</p>}
-      {provinces.length > 0 && (
-        <Stepper label={t('policy.reserve')} value={quantity} {...RESERVE_QUANTITY} format={(v) => num(v)} onChange={setQuantity} />
-      )}
+      {provinces.length > 0 && <Stepper label={t('policy.reserve')} value={quantity} {...RESERVE_QUANTITY} format={(v) => num(v)} onChange={setQuantity} />}
       {provinces.map((p) => {
         const goods = new Set(
           state.reserve.storages

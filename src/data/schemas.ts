@@ -88,12 +88,7 @@ export const fleetBuildingSchema = z.strictObject({
   cost: nonNegative,
 });
 
-export const buildingSchema = z.discriminatedUnion('kind', [
-  producerBuildingSchema,
-  storageBuildingSchema,
-  routeBuildingSchema,
-  fleetBuildingSchema,
-]);
+export const buildingSchema = z.discriminatedUnion('kind', [producerBuildingSchema, storageBuildingSchema, routeBuildingSchema, fleetBuildingSchema]);
 
 export const buildingsFileSchema = z.strictObject({
   buildings: z.array(buildingSchema).min(1),
@@ -154,9 +149,7 @@ export type Explanations = z.infer<typeof explanationsFileSchema>;
 // ---------- balance.json ----------
 // Ставки (ключевая, нейтральная, спред, цель по инфляции) — годовые доли: 0.06 = 6% годовых.
 
-const lagSchema = z
-  .strictObject({ first: turns, full: turns })
-  .refine((lag) => lag.first <= lag.full, 'lag: first должен быть ≤ full');
+const lagSchema = z.strictObject({ first: turns, full: turns }).refine((lag) => lag.first <= lag.full, 'lag: first должен быть ≤ full');
 
 const demandGoodSchema = z.strictObject({
   /** base_i из GDD 5.5: потребление на душу при P = P_ref и B = B_ref (P_ref и B_ref — стартовые значения уровня). */
@@ -274,12 +267,21 @@ export const balanceSchema = z.strictObject({
     markup: nonNegative,
   }),
   /** Веса корзины ИПЦ; отсутствующие в MVP товары не указываются, веса перенормируются. */
-  cpiWeights: z
-    .record(id, positive)
-    .refine((w) => Object.keys(w).length > 0, 'cpiWeights: нужен хотя бы один товар'),
+  cpiWeights: z.record(id, positive).refine((w) => Object.keys(w).length > 0, 'cpiWeights: нужен хотя бы один товар'),
   government: z.strictObject({
     /** Премия к ставке госдолга (годовая) за каждую единицу отношения долг / годовой ВВП. */
     debtRatePremium: nonNegative,
+  }),
+  /** Катастрофы (GDD 4): проигрыш уровня до срока. */
+  catastrophe: z.strictObject({
+    /** Голод: дефицит этого товара у населения провинции ≥ famineShortage famineTurns ходов подряд. */
+    famineGood: id,
+    famineShortage: share,
+    famineTurns: turns,
+    /** Дефолт: госдолг ≥ этой доли годового ВВП (12 × ВВП хода). */
+    defaultDebtToAnnualGdp: positive,
+    /** Потеря доверия: доверие к ЦБ ≤ этого значения (динамика доверия — v0.3). */
+    minTrust: share,
   }),
   /** Задержки решений, ходов (GDD 5.12). Задержки строек — в buildings.json. */
   lags: z.strictObject({
@@ -369,6 +371,87 @@ export const scenarioSchema = z.strictObject({
 });
 
 export type Scenario = z.infer<typeof scenarioSchema>;
+
+// ---------- levels/*.json ----------
+// Уровень (GDD 9, 11): сценарий, seed, срок, рычаги и стройки, шоки по ходам, цели и звёзды, брифинг, вопросы.
+
+/** Рычаги «Политики», которые уровень может открыть. */
+export const LEVERS = ['keyRate', 'taxes', 'transfers', 'subsidies', 'priceCeilings', 'reserve'] as const;
+
+/**
+ * Показатель цели. Доли: unemployment, inflationYoY (до 12 ходов — рост ИПЦ с начала уровня),
+ * shortage.{товар} (по стране), maxShortage.{товар} (худшая провинция), debtToGdp (долг / годовой ВВП).
+ * Уровни: cpi (старт 100), price.{товар}, realWage, budgetBalance (за ход).
+ */
+export const goalMetric = z
+  .string()
+  .regex(/^(cpi|inflationYoY|unemployment|budgetBalance|debtToGdp|realWage|(shortage|maxShortage|price)\.[a-z][a-zA-Z0-9]*)$/, 'неизвестный показатель цели');
+
+export const conditionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('metric'),
+    metric: goalMetric,
+    op: z.enum(['<=', '>=']),
+    value: z.number().finite(),
+    /** end — в последний ход; always — каждый ход начиная с from; streak — turns ходов подряд (не раньше from). */
+    when: z.enum(['end', 'always', 'streak']),
+    from: turns.optional(),
+    turns: turns.optional(),
+  }),
+  z.strictObject({
+    /** Ни разу не принимать решение этого вида (например, «без потолка цен»). */
+    kind: z.literal('noDecision'),
+    decision: z.enum([
+      'setKeyRate',
+      'setTax',
+      'setTransfers',
+      'setSubsidy',
+      'setPriceCeiling',
+      'reserveBuy',
+      'reserveRelease',
+      'addRoadLane',
+      'buildStorage',
+      'buildStateFleet',
+    ]),
+  }),
+]);
+
+export const levelSchema = z.strictObject({
+  id,
+  /** Номер в кампании (GDD 9). */
+  number: z.number().int().positive(),
+  titleKey: i18nKey,
+  /** Брифинг: ситуация и что нового (GDD 10: коротко, теория — в отчёте). */
+  briefingKey: i18nKey,
+  /** Стартовое состояние: файл data/scenarios/<scenario>.json. */
+  scenario: id,
+  seed: z.number().int(),
+  turns,
+  levers: z.array(z.enum(LEVERS)),
+  /** Что можно строить: id из buildings.json (полоса дороги, склады, автопарк). */
+  buildings: z.array(id),
+  /** Шоки по ходам: шок срабатывает в ходе, который даёт месяц turn. */
+  events: z.array(z.strictObject({ turn: turns, shock: id })),
+  /**
+   * Цели. star 1 — пройти уровень (все цели звезды 1), star 2 — основная цель с запасом,
+   * star 3 — дополнительное условие. Звезда N даётся, только если получены все младшие.
+   */
+  goals: z
+    .array(
+      z.strictObject({
+        id,
+        star: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+        condition: conditionSchema,
+      }),
+    )
+    .min(1),
+  /** Вопросы для обсуждения в отчёте (GDD 10). */
+  questions: z.array(i18nKey),
+});
+
+export type Level = z.infer<typeof levelSchema>;
+export type Lever = (typeof LEVERS)[number];
+export type GoalCondition = z.infer<typeof conditionSchema>;
 export type Lag = z.infer<typeof lagSchema>;
 export type Shock = z.infer<typeof shockSchema>;
 export type Good = z.infer<typeof goodSchema>;

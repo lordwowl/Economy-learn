@@ -116,7 +116,7 @@ body {
   grid-area: header;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 8px 12px 0;
 }
 
@@ -715,4 +715,208 @@ button:focus-visible {
   margin-left: 8px;
   min-height: 30px;
   padding: 2px 10px;
+}
+
+/* ---------- уровни: меню, брифинг, цели, отчёт ---------- */
+
+:root {
+  --good: #1d6b3a;
+  --bad: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --good: #6fd08c;
+    --bad: #ff8a80;
+  }
+}
+
+.menu__section {
+  margin: 8px 0 0;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.menu__levels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(360px, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu__levels .menu__button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.menu__button small {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.menu__button--secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 2px solid var(--accent);
+}
+
+.briefing {
+  max-width: 640px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.briefing__title {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.briefing__actions,
+.report__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.briefing__actions > button,
+.report__actions > .turnbar__primary,
+.report__actions > .turnbar__secondary {
+  flex: 1 1 140px;
+}
+
+.stars {
+  letter-spacing: 2px;
+  color: var(--accent);
+}
+
+.stars__empty {
+  color: var(--muted);
+}
+
+.goals__group {
+  margin: 8px 0;
+}
+
+.goals__title {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+}
+
+.goals__list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.goal {
+  margin: 4px 0;
+}
+
+.goal__status {
+  display: block;
+  color: var(--muted);
+}
+
+.goal--met .goal__status {
+  color: var(--good);
+}
+
+.goal--failed .goal__status {
+  color: var(--bad);
+}
+
+.game__goals {
+  margin-left: auto;
+}
+
+.game__header .chip,
+.game__turn {
+  white-space: nowrap;
+}
+
+.news {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.news ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.report__stars {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+
+.report__stars > span:last-child {
+  font-size: 0.9375rem;
+  color: var(--muted);
+}
+
+.report__defeat {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 2px solid var(--bad);
+}
+
+.report__list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chain {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chain__link {
+  position: relative;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chain__link + .chain__link {
+  margin-top: 22px;
+}
+
+/* Стрелка между звеньями: от причины к следствию. */
+.chain__link + .chain__link::before {
+  content: '↓';
+  position: absolute;
+  top: -21px;
+  left: 16px;
+  color: var(--muted);
+}
+
+.chain__link span {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.chain__link--decision {
+  border: 2px solid var(--accent);
 }

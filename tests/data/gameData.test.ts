@@ -6,7 +6,9 @@ import recipes from '../../data/recipes.json';
 import shocks from '../../data/shocks.json';
 import ru from '../../src/i18n/ru.json';
 import scenario from '../../data/scenarios/baseline.json';
-import { GameDataError, getGameData, loadGameData, loadScenario, type RawGameData, type Scenario } from '../../src/data';
+import level05 from '../../data/levels/05_harvest.json';
+import { GameDataError, getGameData, getLevels, getScenarios, loadGameData, loadLevel, loadScenario, type RawGameData, type Scenario } from '../../src/data';
+import { conditionSchema } from '../../src/data/schemas';
 
 const raw = (): RawGameData => structuredClone({ balance, goods, recipes, buildings, shocks });
 
@@ -26,7 +28,11 @@ describe('данные игры из data/', () => {
   });
 
   it('содержат товары MVP (GDD 5.2)', () => {
-    expect(getGameData().goods.map((g) => g.id).sort()).toEqual(['bread', 'flour', 'fuel', 'grain']);
+    expect(
+      getGameData()
+        .goods.map((g) => g.id)
+        .sort(),
+    ).toEqual(['bread', 'flour', 'fuel', 'grain']);
   });
 
   it('у каждого товара и здания есть строка в ru.json', () => {
@@ -52,7 +58,10 @@ describe('данные игры из data/', () => {
   it('топливо — сквозной ресурс: входит во все рецепты, кроме самого топлива', () => {
     for (const recipe of getGameData().recipes) {
       if (recipe.output.good === 'fuel') continue;
-      expect(recipe.inputs.map((i) => i.good), recipe.id).toContain('fuel');
+      expect(
+        recipe.inputs.map((i) => i.good),
+        recipe.id,
+      ).toContain('fuel');
     }
   });
 
@@ -172,5 +181,55 @@ describe('сценарии', () => {
     expect(issues).toMatch(/toNowhere: неизвестная провинция "nowhere"/);
     expect(issues).toMatch(/loop ведёт в ту же провинцию/);
     expect(issues).toMatch(/twin дублирует/);
+  });
+});
+
+describe('уровни', () => {
+  const levelIssues = (patch: (level: Record<string, unknown>) => void): string[] => {
+    const raw = structuredClone(level05) as unknown as Record<string, unknown>;
+    patch(raw);
+    try {
+      loadLevel(raw, getGameData(), getScenarios(), 'test.json');
+    } catch (error) {
+      if (error instanceof GameDataError) return error.issues;
+      throw error;
+    }
+    return [];
+  };
+  const goals = (level: Record<string, unknown>) => level.goals as { id: string; star: number; condition: Record<string, unknown> }[];
+
+  it('все уровни валидны, у текстов есть строки в ru.json', () => {
+    const levels = getLevels();
+    expect(levels.length).toBeGreaterThan(0);
+    for (const level of levels) {
+      for (const key of [level.titleKey, level.briefingKey, ...level.questions]) expect(Object.keys(ru), key).toContain(key);
+      for (const goal of level.goals) {
+        const c = goal.condition;
+        const key = c.kind === 'metric' ? `goal.metric.${c.metric.split('.')[0]}` : `goal.noDecision.${c.decision}`;
+        expect(Object.keys(ru), key).toContain(key);
+      }
+    }
+  });
+
+  it('у каждого вида решения для noDecision есть текст', () => {
+    for (const decision of conditionSchema.options[1].shape.decision.options) expect(Object.keys(ru)).toContain(`goal.noDecision.${decision}`);
+  });
+
+  it('ловит ошибки ссылок и сроков', () => {
+    expect(levelIssues((l) => (l.scenario = 'nope'))).toContain('test.json: неизвестный сценарий "nope"');
+    expect(levelIssues((l) => (l.events = [{ turn: 3, shock: 'meteor' }]))).toContain('test.json: неизвестный шок "meteor"');
+    expect(levelIssues((l) => (l.events = [{ turn: 99, shock: 'harvestFailure' }])).join('\n')).toMatch(/позже конца уровня/);
+    expect(levelIssues((l) => (l.buildings = ['farm'])).join('\n')).toMatch(/нельзя строить/);
+    expect(levelIssues((l) => (goals(l)[0]!.condition.metric = 'price.coal')).join('\n')).toMatch(/неизвестный товар "coal"/);
+    expect(levelIssues((l) => (goals(l)[0]!.condition.metric = 'happiness')).join('\n')).toMatch(/неизвестный показатель/);
+    expect(levelIssues((l) => (goals(l)[0]!.condition.when = 'streak')).join('\n')).toMatch(/для streak нужно turns/);
+    expect(levelIssues((l) => (l.goals = goals(l).filter((g) => g.star !== 2))).join('\n')).toMatch(/звезду 2/);
+    expect(levelIssues((l) => (goals(l)[1]!.id = goals(l)[0]!.id)).join('\n')).toMatch(/повторяющийся id/);
+  });
+
+  it('голод — товар из данных', () => {
+    const data = raw();
+    (data.balance as typeof balance).catastrophe.famineGood = 'rice';
+    expect(issuesOf(data).join('\n')).toMatch(/catastrophe\.famineGood: неизвестный товар "rice"/);
   });
 });
