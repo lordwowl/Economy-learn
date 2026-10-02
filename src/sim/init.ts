@@ -359,6 +359,13 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   if (s <= 0) throw new Error('при стартовой ставке домохозяйства ничего не тратят');
   const laborForce = scenario.provinces.reduce((sum, p) => sum + p.laborForce, 0);
   const employment = Math.min(laborDemand, laborForce);
+  // Занятые по отраслям; если труда не хватает, все урезаются в одной пропорции (как в ходе).
+  const laborShare = laborDemand > 0 ? employment / laborDemand : 0;
+  const employmentBySector: Record<string, number> = { logistics: plan.logisticsLabor * laborShare };
+  for (const firm of firms) {
+    employmentBySector[firm.building] =
+      (employmentBySector[firm.building] ?? 0) + (plan.runs.get(firm.id) ?? 0) * recipeFor(firm).labor * laborShare;
+  }
   revenue += employment * wage * scenario.taxes.income;
   const transfersPerCapita = scenario.transfersPerCapita === 'balanced' ? revenue / population : scenario.transfersPerCapita;
   const provinces: Province[] = scenario.provinces.map((p) => {
@@ -405,6 +412,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     inflationMoM: 0,
     inflationYoY: null,
     unemployment: 1 - employment / laborForce,
+    employmentBySector,
     employment,
     wage,
     realWage: wage,

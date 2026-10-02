@@ -434,6 +434,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   }
   payWages(state, trade.logisticsWages);
   const employment = productionLabor + trade.logisticsLabor;
+  const employmentBySector: Record<string, number> = { logistics: trade.logisticsLabor };
+  for (const firm of state.firms) {
+    employmentBySector[firm.building] = (employmentBySector[firm.building] ?? 0) + firm.lastRuns * recipeOf(firm).labor;
+  }
 
   // 6a. Заказы: продажи + неудовлетворённый спрос, разнесённый по производителям пропорционально мощности.
   const capacityByGood: Record<GoodId, number> = {};
@@ -662,6 +666,13 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
 
   // 7c. Зарплата и ожидания.
   const unemployment = unemploymentRate(employment, laborForce);
+  // Безработица u = 1 − E / L: вклад отрасли = −ΔE_отрасли / L.
+  const unemploymentContributions: Breakdown = {};
+  for (const sector of new Set([...Object.keys(employmentBySector), ...Object.keys(prev.metrics.employmentBySector)])) {
+    const delta = (employmentBySector[sector] ?? 0) - (prev.metrics.employmentBySector[sector] ?? 0);
+    unemploymentContributions[`employment.${sector}`] = laborForce > 0 ? -delta / laborForce : 0;
+  }
+  causes.push(makeCauseEvent(turn, 'unemployment', unemploymentContributions));
   const wageUpdate = nextWage(state.wage, unemployment, expected, balance.labor, turn);
   causes.push(wageUpdate.cause);
   const paidWage = state.wage;
@@ -692,6 +703,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     inflationYoY: yearAgo !== undefined && yearAgo > 0 ? cpi / yearAgo - 1 : null,
     unemployment,
     employment,
+    employmentBySector,
     wage: paidWage,
     realWage: cpi > 0 ? (paidWage * 100) / cpi : 0,
     householdSpending,

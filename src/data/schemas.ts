@@ -125,6 +125,32 @@ export const shocksFileSchema = z.strictObject({
   shocks: z.array(shockSchema),
 });
 
+// ---------- explanations.json ----------
+// Шаблоны объяснений (GDD 6): какой ключ ru.json описывает метрику и каждую её причину.
+// В шаблоне {имя} — один сегмент id (без точек): price.{good}.{province}.
+
+const pattern = z.string().regex(/^[a-zA-Z0-9{}.]+$/);
+
+export const explanationsFileSchema = z.strictObject({
+  groups: z.array(
+    z.strictObject({
+      id,
+      metrics: z.array(z.strictObject({ pattern, key: i18nKey })).min(1),
+      causes: z.array(
+        z.strictObject({
+          pattern,
+          /** Текст, когда причина увеличила метрику. */
+          up: i18nKey,
+          /** Текст, когда уменьшила; без поля — тот же, что up. */
+          down: i18nKey.optional(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export type Explanations = z.infer<typeof explanationsFileSchema>;
+
 // ---------- balance.json ----------
 // Ставки (ключевая, нейтральная, спред, цель по инфляции) — годовые доли: 0.06 = 6% годовых.
 

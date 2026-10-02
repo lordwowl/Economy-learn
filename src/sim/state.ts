@@ -200,6 +200,8 @@ export interface Metrics {
   inflationYoY: number | null;
   unemployment: number;
   employment: number;
+  /** Занятые по отраслям: здания (farm, mill, …) и logistics. Σ = employment. */
+  employmentBySector: Record<string, number>;
   wage: number;
   realWage: number;
   householdSpending: number;
