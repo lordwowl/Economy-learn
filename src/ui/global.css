@@ -155,6 +155,7 @@ body {
 
 .tile__value {
   font-size: 1rem;
+  white-space: nowrap;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -555,4 +556,163 @@ button:focus-visible {
 
 .why__line--down {
   color: var(--down);
+}
+
+/* ---------- графики и рентген: категориальная палитра (проверена валидатором, светлая и тёмная) ---------- */
+
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-other: #8a8a85;
+  --series-policy: #b2452a;
+  --grid: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-other: #9a9a94;
+    --series-policy: #e66767;
+  }
+}
+
+.segmented {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.chip--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.xray__price {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.xray__price strong {
+  font-size: 1.25rem;
+}
+
+.xray__bar {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  margin: 6px 0 8px;
+}
+
+.xray__segment {
+  height: 100%;
+  min-width: 2px;
+}
+
+.xray__segment:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.xray__segment:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.xray__legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+}
+
+.xray__row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.xray__swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.xray__swatch--policy {
+  background: repeating-linear-gradient(45deg, var(--series-policy) 0 3px, transparent 3px 6px);
+  border: 1px solid var(--series-policy);
+}
+
+.xray__share {
+  min-width: 3.5em;
+  text-align: right;
+  color: var(--muted);
+}
+
+.xray__link {
+  display: grid;
+  grid-template-columns: minmax(90px, 40%) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.xray__link-bar {
+  height: 10px;
+  border-radius: 0 4px 4px 0;
+  background: var(--series-1);
+}
+
+.chart {
+  width: 100%;
+  min-height: 200px;
+}
+
+.chart .u-legend {
+  font-size: 0.8125rem;
+  color: var(--fg);
+}
+
+.chart-table {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-table table {
+  border-collapse: collapse;
+}
+
+.chart-table td,
+.chart-table th {
+  padding: 2px 10px 2px 0;
+  text-align: right;
+}
+
+.summary__xray {
+  margin-left: 8px;
+  min-height: 30px;
+  padding: 2px 10px;
 }

@@ -6,13 +6,19 @@ import { addDecision, createSession, currentState, decisionKey, endTurn, fastFor
 import { monthSummary, type SummaryItem } from '../game/summary';
 import { t } from '../i18n';
 import type { Action, WorldState } from '../sim';
+import type { ChartMetric } from '../game/charts';
 import { BuildPanel } from './BuildPanel';
+import { ChartsPanel } from './ChartsPanel';
 import { DecisionsPanel } from './DecisionsPanel';
 import { Modal } from './controls';
 import { describeSummary } from './labels';
 import { MapView } from './MapView';
 import { PolicyPanel } from './PolicyPanel';
 import { TopBar, type TopMetric } from './TopBar';
+import { XrayView } from './XrayView';
+
+/** График, который открывается из «Почему?» у показателя верхней панели. */
+const TOP_CHART: Partial<Record<TopMetric, ChartMetric>> = { cpi: 'cpi', unemployment: 'unemployment', 'budget.balance': 'budgetBalance' };
 
 const SEED = 42;
 const FAST_FORWARD_TURNS = 3;
@@ -50,6 +56,17 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<Tab>('policy');
   /** На телефоне панель свёрнута, чтобы карте хватало места; на компьютере она открыта всегда (CSS). */
   const [panelOpen, setPanelOpen] = useState(false);
+  const [chartsView, setChartsView] = useState<'xray' | 'indicators'>('xray');
+  const [xrayTarget, setXrayTarget] = useState<{ good: string; province: string | undefined }>({ good: 'bread', province: undefined });
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('cpi');
+  const states = useMemo(() => session.history.map((h) => h.state), [session.history]);
+  const openXray = (good: string) => {
+    setXrayTarget((x) => ({ ...x, good }));
+    setChartsView('xray');
+    setTab('charts');
+    setPanelOpen(true);
+    setDialog(null);
+  };
   const [dialog, setDialog] = useState<Dialog>(null);
 
   const state = currentState(session);
@@ -134,7 +151,30 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
         <div class={panelOpen ? 'game__panel game__panel--open' : 'game__panel'}>
           {tab === 'policy' && <PolicyPanel state={state} data={data} decisions={session.decisions} onDecide={decide} />}
           {tab === 'build' && <BuildPanel state={state} data={data} onDecide={decide} />}
-          {tab === 'charts' && <p class="section__hint">{t('tabs.chartsSoon')}</p>}
+          {tab === 'charts' && (
+            <div class="panel">
+              <div class="segmented" role="group">
+                {(['xray', 'indicators'] as const).map((v) => (
+                  <button key={v} type="button" class={chartsView === v ? 'chip chip--active' : 'chip'} aria-pressed={chartsView === v} onClick={() => setChartsView(v)}>
+                    {t(v === 'xray' ? 'charts.xray' : 'charts.indicators')}
+                  </button>
+                ))}
+              </div>
+              {chartsView === 'xray' ? (
+                <XrayView
+                  state={state}
+                  prev={prev}
+                  causes={session.history.at(-1)!.causes}
+                  data={data}
+                  good={xrayTarget.good}
+                  province={xrayTarget.province}
+                  onSelect={(good, province) => setXrayTarget({ good, province })}
+                />
+              ) : (
+                <ChartsPanel states={states} metric={chartMetric} onMetric={setChartMetric} />
+              )}
+            </div>
+          )}
           <DecisionsPanel state={state} data={data} decisions={session.decisions} onRemove={(i) => setSession((s) => removeDecision(s, i))} />
         </div>
         {!panelOpen && session.decisions.length > 0 && (
@@ -157,6 +197,11 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
             {dialog.items.map((item, i) => (
               <li key={i} class="summary__item">
                 <strong>{describeSummary(item, state)}</strong>
+                {item.kind === 'price' && item.target && (
+                  <button type="button" class="chip summary__xray" onClick={() => openXray(item.target!)}>
+                    {t('xray.open')}
+                  </button>
+                )}
                 {item.causes.length > 0 && (
                   <ul class="why">
                     {item.causes.map((c) => (
@@ -180,6 +225,9 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
           onClose={() => setDialog(null)}
         >
           {whyDialog(dialog.metric)}
+          {TOP_CHART[dialog.metric] && states.length >= 2 && (
+            <ChartsPanel states={states} metric={TOP_CHART[dialog.metric]!} onMetric={() => undefined} compact />
+          )}
         </Modal>
       )}
     </div>
