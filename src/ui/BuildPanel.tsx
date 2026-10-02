@@ -1,4 +1,5 @@
 import type { GameData } from '../data';
+import { stateFirmCost } from '../sim/step';
 import { t, translate } from '../i18n';
 import type { Action, WorldState } from '../sim';
 import { Section } from './controls';
@@ -18,6 +19,8 @@ export function BuildPanel({ state, data, onDecide, allowed }: Props) {
   const lane = data.buildings.find((b) => b.kind === 'route' && can(b.id));
   const fleet = data.buildings.find((b) => b.kind === 'fleet' && can(b.id));
   const storages = data.buildings.filter((b) => b.kind === 'storage' && can(b.id));
+  // Госпредприятия: НПЗ (государственный по данным) и, где уровень разрешает, частные здания в собственности государства.
+  const stateFirms = data.buildings.filter((b) => b.kind === 'producer' && (allowed === undefined ? b.owner === 'state' : can(b.id)));
   const stateCarrier = state.logistics.carriers.find((c) => c.id === 'state');
 
   return (
@@ -39,7 +42,7 @@ export function BuildPanel({ state, data, onDecide, allowed }: Props) {
         </Section>
       )}
 
-      {!lane && !fleet && storages.length === 0 && <p class="section__hint">{t('build.closed')}</p>}
+      {!lane && !fleet && storages.length === 0 && stateFirms.length === 0 && <p class="section__hint">{t('build.closed')}</p>}
 
       {storages.length > 0 && (
         <Section title={t('build.storages')}>
@@ -55,6 +58,27 @@ export function BuildPanel({ state, data, onDecide, allowed }: Props) {
                     <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStorage', building: b.id, province: p.id })}>
                       +1
                       <small>{t('build.cost', { cost: money(b.cost), turns: b.buildTurns })}</small>
+                    </button>
+                  </div>
+                )),
+          )}
+        </Section>
+      )}
+
+      {stateFirms.length > 0 && (
+        <Section title={t('build.stateFirms')}>
+          {stateFirms.map((b) =>
+            b.kind !== 'producer'
+              ? null
+              : state.provinces.map((p) => (
+                  <div class="build-row" key={`${b.id}-${p.id}`}>
+                    <div class="build-row__text">
+                      <strong>{t('build.storage', { building: translate(b.nameKey), province: provinceName(state, p.id) })}</strong>
+                      <span>{t('build.stateFirmInfo', { capacity: num(b.capacity) })}</span>
+                    </div>
+                    <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStateFirm', building: b.id, province: p.id })}>
+                      +1
+                      <small>{t('build.cost', { cost: money(stateFirmCost(b, data.balance)), turns: b.buildTurns })}</small>
                     </button>
                   </div>
                 )),

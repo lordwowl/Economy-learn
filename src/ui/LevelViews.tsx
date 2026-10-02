@@ -112,6 +112,11 @@ export function LevelReport({ level, history, data, onReplay, onMenu, onClose }:
         {report.chains.length === 0 && <p>{t('report.noChain')}</p>}
         {report.chains.map((chain, i) => (
           <ol class="chain" key={i}>
+            {chain.events.map((d, j) => (
+              <li key={`e${j}`} class="chain__link chain__link--decision">
+                <strong>{t('report.eventLink', { event: describeDecision(d.action, last, data), turn: d.turn })}</strong>
+              </li>
+            ))}
             {chain.decisions.map((d, j) => (
               <li key={`d${j}`} class="chain__link chain__link--decision">
                 <strong>{t('report.yourDecision', { decision: describeDecision(d.action, last, data), turn: d.turn })}</strong>

@@ -2,21 +2,28 @@ import balance from '../../data/balance.json';
 import buildings from '../../data/buildings.json';
 import explanations from '../../data/explanations.json';
 import goods from '../../data/goods.json';
+import level03 from '../../data/levels/03_chain.json';
 import level05 from '../../data/levels/05_harvest.json';
+import level06 from '../../data/levels/06_ceiling.json';
+import level09 from '../../data/levels/09_overheating.json';
 import recipes from '../../data/recipes.json';
 import baseline from '../../data/scenarios/baseline.json';
+import ceiling from '../../data/scenarios/ceiling.json';
+import chain from '../../data/scenarios/chain.json';
+import harvest from '../../data/scenarios/harvest.json';
+import overheating from '../../data/scenarios/overheating.json';
 import shocks from '../../data/shocks.json';
-import { loadGameData, loadLevel, loadScenario, type GameData } from './load';
+import { loadGameData, loadLevel, loadScenario, resolveScenario, type GameData } from './load';
 import { explanationsFileSchema, type Explanations, type Level, type Scenario } from './schemas';
 
-export { loadGameData, loadLevel, loadScenario, GameDataError, type GameData, type RawGameData } from './load';
+export { loadGameData, loadLevel, loadScenario, resolveScenario, GameDataError, type GameData, type RawGameData } from './load';
 export type * from './schemas';
 export { LEVERS } from './schemas';
 
 /** Сценарии (стартовые состояния) из data/scenarios/: имя файла → JSON. */
-const RAW_SCENARIOS: Record<string, unknown> = { baseline };
+const RAW_SCENARIOS: Record<string, unknown> = { baseline, chain, harvest, ceiling, overheating };
 /** Уровни кампании из data/levels/: имя файла → JSON. */
-const RAW_LEVELS: Record<string, unknown> = { '05_harvest': level05 };
+const RAW_LEVELS: Record<string, unknown> = { '03_chain': level03, '05_harvest': level05, '06_ceiling': level06, '09_overheating': level09 };
 
 let cached: GameData | undefined;
 let cachedExplanations: Explanations | undefined;
@@ -37,7 +44,12 @@ export function getExplanations(): Explanations {
 
 export function getScenarios(): Record<string, Scenario> {
   const data = getGameData();
-  cachedScenarios ??= Object.fromEntries(Object.entries(RAW_SCENARIOS).map(([name, raw]) => [name, loadScenario(raw, data, `${name}.json`)]));
+  const getRaw = (name: string) => {
+    const raw = RAW_SCENARIOS[name];
+    if (raw === undefined) throw new Error(`Нет сценария "${name}"`);
+    return raw;
+  };
+  cachedScenarios ??= Object.fromEntries(Object.keys(RAW_SCENARIOS).map((name) => [name, loadScenario(resolveScenario(name, getRaw), data, `${name}.json`)]));
   return cachedScenarios;
 }
 

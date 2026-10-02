@@ -1,0 +1,133 @@
+{
+ "level": "harvest",
+ "seed": 42,
+ "turns": 24,
+ "results": {
+  "passive": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "hawk": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "dove": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "ceiling": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "met",
+    "jobs": "failed"
+   },
+   "cpi": 90.25377091299362,
+   "unemployment": 0.052817421824365884,
+   "maxUnemployment": 0.2799891207972369,
+   "maxBreadShortage": 0.9815478177951171
+  },
+  "builder": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "reserve": {
+   "outcome": "completed",
+   "stars": 3,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "met",
+    "cpi": "met",
+    "jobs": "met"
+   },
+   "cpi": 103.7896315745316,
+   "unemployment": 0.03371090819935396,
+   "maxUnemployment": 0.18227566331273515,
+   "maxBreadShortage": 0
+  },
+  "lift": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "gradual": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  },
+  "neutral": {
+   "outcome": "completed",
+   "stars": 0,
+   "defeatTurn": null,
+   "goals": {
+    "noHunger": "failed",
+    "cpi": "failed",
+    "jobs": "failed"
+   },
+   "cpi": 115.5940240680486,
+   "unemployment": 0.05394809016765523,
+   "maxUnemployment": 0.2783275625963856,
+   "maxBreadShortage": 0.44947154528833017
+  }
+ }
+}

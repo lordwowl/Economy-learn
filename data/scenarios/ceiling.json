@@ -1,0 +1,4 @@
+{
+  "extends": "baseline",
+  "priceCeilings": { "bread": 0.75 }
+}

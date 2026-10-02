@@ -23,6 +23,8 @@ export function contextFromState(state: WorldState): ExplainContext {
           return translate(`good.${id}`);
         case 'province':
           return provinces.get(id) ?? id;
+        case 'shock':
+          return translate(`shock.${id}`);
         case 'sector':
           return id === 'logistics' ? translate('sector.logistics') : translate(`building.${id}`);
         case 'firm': {

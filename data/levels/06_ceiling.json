@@ -1,0 +1,18 @@
+{
+  "id": "ceiling",
+  "number": 6,
+  "titleKey": "level.ceiling.title",
+  "briefingKey": "level.ceiling.briefing",
+  "scenario": "ceiling",
+  "seed": 42,
+  "turns": 18,
+  "levers": ["taxes", "subsidies", "priceCeilings"],
+  "buildings": [],
+  "events": [],
+  "goals": [
+    { "id": "supply", "star": 1, "condition": { "kind": "metric", "metric": "maxShortage.bread", "op": "<=", "value": 0.05, "when": "end" } },
+    { "id": "fast", "star": 2, "condition": { "kind": "metric", "metric": "maxShortage.bread", "op": "<=", "value": 0.05, "when": "always", "from": 4 } },
+    { "id": "budget", "star": 3, "condition": { "kind": "metric", "metric": "debtToGdp", "op": "<=", "value": 0.05, "when": "end" } }
+  ],
+  "questions": ["level.ceiling.q1", "level.ceiling.q2", "level.ceiling.q3"]
+}

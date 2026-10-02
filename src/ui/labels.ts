@@ -52,6 +52,8 @@ export function describeDecision(action: Action, state: WorldState, data: GameDa
       return t('decision.buildStorage', { building: translate(`building.${action.building}`), province: provinceName(state, action.province) });
     case 'buildStateFleet':
       return t('decision.buildStateFleet');
+    case 'buildStateFirm':
+      return t('decision.buildStateFirm', { building: translate(`building.${action.building}`), province: provinceName(state, action.province) });
     case 'reserveBuy':
     case 'reserveRelease':
       return t(action.type === 'reserveBuy' ? 'decision.reserveBuy' : 'decision.reserveRelease', {
@@ -193,13 +195,16 @@ export function chainChange(metric: string, value: number, start: WorldState): s
   if (metric === 'budget.balance') return signedMoney(value);
   if (metric === 'wage') return relative(start.wage);
   if (metric.startsWith('price.')) return relative(start.market[metric.split('.')[1]!]?.price);
+  if (metric.startsWith('supplyLoss.')) return t('report.units', { value: num(value) });
   return signed(value, 2);
 }
 
 /** Звено цепочки: «Цена «Хлеб» ▲ +31,6%» и «Главная причина: Фирмы подняли наценку (+24,7%)». */
 export function describeChainLink(link: ChainLink, start: WorldState, ctx: ExplainContext): { title: string; cause: string } {
   return {
-    title: `${metricLabel(link.metric, ctx)} ${arrow(link.delta)} ${chainChange(link.metric, link.delta, start)}`,
+    title: link.metric.startsWith('supplyLoss.')
+      ? t('report.lossTitle', { metric: metricLabel(link.metric, ctx), value: chainChange(link.metric, link.delta, start) })
+      : `${metricLabel(link.metric, ctx)} ${arrow(link.delta)} ${chainChange(link.metric, link.delta, start)}`,
     cause: t('report.mainCause', { cause: causeLine(link.metric, link.cause, ctx).text, value: chainChange(link.metric, link.cause.value, start) }),
   };
 }

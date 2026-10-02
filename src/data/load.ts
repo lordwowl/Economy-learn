@@ -139,6 +139,20 @@ export function loadGameData(raw: RawGameData): GameData {
   return data;
 }
 
+/**
+ * Наследование сценариев: `"extends": "baseline"` — поля верхнего уровня заменяют поля базового сценария
+ * (карта, дороги, провинции берутся из базового, если не заданы). getRaw возвращает сырой JSON по имени файла.
+ */
+export function resolveScenario(name: string, getRaw: (name: string) => unknown, seen: ReadonlySet<string> = new Set()): unknown {
+  if (seen.has(name)) throw new GameDataError([`${name}.json: циклическое наследование сценариев`]);
+  const raw = getRaw(name);
+  if (raw === null || typeof raw !== 'object' || !('extends' in raw)) return raw;
+  const { extends: base, ...own } = raw as Record<string, unknown>;
+  if (typeof base !== 'string') throw new GameDataError([`${name}.json: extends — имя сценария`]);
+  const parent = resolveScenario(base, getRaw, new Set([...seen, name]));
+  return { ...(parent as Record<string, unknown>), ...own };
+}
+
 /** Валидирует сценарий (стартовое состояние) против уже загруженных данных игры. */
 export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): Scenario {
   const issues: string[] = [];
@@ -152,6 +166,9 @@ export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): S
     if (province.laborForce > province.population) {
       issues.push(`${file}: ${province.id}: рабочая сила больше населения`);
     }
+  }
+  for (const good of Object.keys(scenario.priceCeilings ?? {})) {
+    if (!data.goods.some((g) => g.id === good)) issues.push(`${file}: потолок цены: неизвестный товар "${good}"`);
   }
   for (const firm of scenario.firms) {
     if (!producers.has(firm.building)) issues.push(`${file}: "${firm.building}" не производственное здание`);
@@ -199,12 +216,19 @@ export function loadLevel(raw: unknown, data: GameData, scenarios: Readonly<Reco
 
   if (!scenarios[level.scenario]) issues.push(`${file}: неизвестный сценарий "${level.scenario}"`);
   const goodIds = new Set(data.goods.map((g) => g.id));
-  const buildable = new Set(data.buildings.filter((b) => b.kind !== 'producer').map((b) => b.id));
+  // Игрок строит инфраструктуру и госпредприятия (любое производственное здание — в собственности государства, GDD 3).
   for (const b of level.buildings) {
-    if (!buildable.has(b)) issues.push(`${file}: "${b}" нельзя строить игроку (нет в buildings.json или это производство)`);
+    if (!data.buildings.some((x) => x.id === b)) issues.push(`${file}: "${b}" нет в buildings.json`);
   }
+  const provinces = new Set(scenarios[level.scenario]?.provinces.map((p) => p.id) ?? []);
   for (const e of level.events) {
-    if (!data.shocks.some((s) => s.id === e.shock)) issues.push(`${file}: неизвестный шок "${e.shock}"`);
+    const shock = data.shocks.find((s) => s.id === e.shock);
+    if (!shock) issues.push(`${file}: неизвестный шок "${e.shock}"`);
+    for (const effect of shock?.effects ?? []) {
+      if (effect.province !== undefined && !provinces.has(effect.province)) {
+        issues.push(`${file}: шок "${e.shock}" ссылается на провинцию "${effect.province}", которой нет в сценарии`);
+      }
+    }
     if (e.turn > level.turns) issues.push(`${file}: шок "${e.shock}" на ходу ${e.turn} — позже конца уровня (${level.turns})`);
   }
   checkUniqueIds(file, level.goals, issues);

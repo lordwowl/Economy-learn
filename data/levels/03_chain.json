@@ -1,0 +1,18 @@
+{
+  "id": "chain",
+  "number": 3,
+  "titleKey": "level.chain.title",
+  "briefingKey": "level.chain.briefing",
+  "scenario": "chain",
+  "seed": 42,
+  "turns": 24,
+  "levers": ["taxes", "subsidies", "priceCeilings"],
+  "buildings": ["farm", "mill", "bakery"],
+  "events": [],
+  "goals": [
+    { "id": "bread", "star": 1, "condition": { "kind": "metric", "metric": "price.bread", "op": "<=", "value": 1000, "when": "end" } },
+    { "id": "noShortage", "star": 2, "condition": { "kind": "metric", "metric": "maxShortage.bread", "op": "<=", "value": 0.1, "when": "always" } },
+    { "id": "cpi", "star": 3, "condition": { "kind": "metric", "metric": "cpi", "op": "<=", "value": 106, "when": "end" } }
+  ],
+  "questions": ["level.chain.q1", "level.chain.q2", "level.chain.q3"]
+}

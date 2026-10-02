@@ -7,8 +7,8 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getGameData, getLevels, getScenario, loadScenario, type GameData, type Level } from '../src/data';
-import { evaluateLevel, levelEvents, type LevelStatus } from '../src/game/level';
+import { getGameData, getLevels, getScenario, loadScenario, resolveScenario, type GameData, type Level } from '../src/data';
+import { evaluateLevel, isAllowed, levelEvents, type LevelStatus } from '../src/game/level';
 import { createInitialState, Rng, step, type Action, type WorldState } from '../src/sim';
 import { policies, policyNames } from './policies';
 
@@ -104,8 +104,8 @@ export function parseArgs(argv: readonly string[]): RunnerOptions {
 }
 
 export function loadScenarioFile(name: string, data: GameData) {
-  const file = join(import.meta.dirname, '..', 'data', 'scenarios', `${name}.json`);
-  return loadScenario(JSON.parse(readFileSync(file, 'utf8')), data, `${name}.json`);
+  const read = (n: string): unknown => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'data', 'scenarios', `${n}.json`), 'utf8'));
+  return loadScenario(resolveScenario(name, read), data, `${name}.json`);
 }
 
 function row(state: WorldState, events: string[]): Row {
@@ -148,7 +148,8 @@ export function simulate(options: Omit<RunnerOptions, 'format'>, data: GameData 
   const rows = [row(state, [])];
   const history: { state: WorldState; causes: []; actions: Action[]; events: Action[] }[] = [{ state, causes: [], actions: [], events: [] }];
   for (let t = 1; t <= options.turns; t++) {
-    const decisions = policy(state, t, data);
+    // На уровне бот может то же, что игрок: закрытые рычаги и стройки отбрасываются.
+    const decisions = policy(state, t, data).filter((a) => !level || isAllowed(level, a, data));
     const shocks = level ? levelEvents(level, t) : [];
     const actions = [...decisions, ...shocks];
     state = step(state, actions, rng, data).state;

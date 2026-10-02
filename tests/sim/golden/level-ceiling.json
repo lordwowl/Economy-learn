@@ -1,0 +1,133 @@
+{
+ "level": "ceiling",
+ "seed": 42,
+ "turns": 18,
+ "results": {
+  "passive": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  },
+  "hawk": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  },
+  "dove": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  },
+  "ceiling": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 4,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 74.80714505706298,
+   "unemployment": 0.5581279479209137,
+   "maxUnemployment": 0.5581279479209137,
+   "maxBreadShortage": 1
+  },
+  "builder": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  },
+  "reserve": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  },
+  "lift": {
+   "outcome": "completed",
+   "stars": 3,
+   "defeatTurn": null,
+   "goals": {
+    "supply": "met",
+    "fast": "met",
+    "budget": "met"
+   },
+   "cpi": 103.34043692954135,
+   "unemployment": 0.05980807499943619,
+   "maxUnemployment": 0.07111683564329874,
+   "maxBreadShortage": 0
+  },
+  "gradual": {
+   "outcome": "completed",
+   "stars": 3,
+   "defeatTurn": null,
+   "goals": {
+    "supply": "met",
+    "fast": "met",
+    "budget": "met"
+   },
+   "cpi": 104.10952888992868,
+   "unemployment": 0.09340225378275402,
+   "maxUnemployment": 0.10884543792199675,
+   "maxBreadShortage": 0
+  },
+  "neutral": {
+   "outcome": "defeated",
+   "stars": 0,
+   "defeatTurn": 9,
+   "goals": {
+    "supply": "failed",
+    "fast": "failed",
+    "budget": "failed"
+   },
+   "cpi": 97.51209300071459,
+   "unemployment": 0.5717845465642073,
+   "maxUnemployment": 0.6832333500437504,
+   "maxBreadShortage": 1
+  }
+ }
+}

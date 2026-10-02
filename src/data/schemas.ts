@@ -179,6 +179,8 @@ export const balanceSchema = z.strictObject({
       markupMax: z.number().finite(),
       /** β. */
       markupAdjustSpeed: nonNegative,
+      /** ρ: какую долю отклонения наценки от нормальной (initialMarkup) конкуренция снимает за ход. */
+      markupReversion: share,
       /** α — липкость цен. */
       priceStickiness: share,
       /** γ — доля ожидаемой инфляции, закладываемая в цену. */
@@ -271,6 +273,8 @@ export const balanceSchema = z.strictObject({
   government: z.strictObject({
     /** Премия к ставке госдолга (годовая) за каждую единицу отношения долг / годовой ВВП. */
     debtRatePremium: nonNegative,
+    /** Госпредприятие на месте частной фирмы (мельница, пекарня…) дороже во столько раз (GDD 3: «дорого и неэффективно»). */
+    stateFirmCostMultiplier: z.number().min(1),
   }),
   /** Катастрофы (GDD 4): проигрыш уровня до срока. */
   catastrophe: z.strictObject({
@@ -301,8 +305,14 @@ export const balanceSchema = z.strictObject({
 export const scenarioSchema = z.strictObject({
   /** Стартовая зарплата за единицу труда. */
   wage: positive,
-  /** Стартовая ключевая ставка, годовая доля. */
+  /** Ключевая ставка, при которой рассчитано стартовое равновесие, годовая доля. */
   keyRate: z.number().finite(),
+  /** Ставка, действующая на старте, если её только что изменили (уровень «Перегрев»): равновесие — при keyRate, спрос и кредит — уже при этой. */
+  startKeyRate: z.number().finite().optional(),
+  /** Стартовые инфляционные ожидания, годовая доля (по умолчанию — цель по инфляции). */
+  expectedInflation: z.number().gt(-1).optional(),
+  /** Потолки цен на старте (решение прежнего правительства): товар → доля стартовой цены производителей. */
+  priceCeilings: z.record(id, z.number().positive()).optional(),
   /** Доверие к ЦБ C ∈ [0, 1] (GDD 5.9). */
   trust: share,
   /** Ставки налогов (GDD 5.11): с продаж, на прибыль, на доходы. */
@@ -412,6 +422,7 @@ export const conditionSchema = z.discriminatedUnion('kind', [
       'addRoadLane',
       'buildStorage',
       'buildStateFleet',
+      'buildStateFirm',
     ]),
   }),
 ]);

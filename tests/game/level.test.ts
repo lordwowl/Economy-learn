@@ -6,6 +6,8 @@ import type { Action, WorldState } from '../../src/sim';
 
 const data = getGameData();
 const harvest = getLevels().find((l) => l.id === 'harvest')!;
+const ceilingLevel = getLevels().find((l) => l.id === 'ceiling')!;
+const SHOCK_TURN = harvest.events[0]!.turn;
 
 /** Играет уровень до конца: decide(state) — решения игрока перед каждым ходом. */
 function play(level: Level, decide: (state: WorldState) => Action[] = () => []): Session {
@@ -23,13 +25,16 @@ const goal = (condition: Level['goals'][number]['condition'], star: 1 | 2 | 3 = 
 
 describe('контроллер уровня (GDD 4, 9)', () => {
   const passive = play(harvest);
+  /** Игрок вводит потолок на хлеб на первом ходу (для целей «без потолка»). */
   const ceiling = play(harvest, (s) => (s.turn === 1 ? [{ type: 'setPriceCeiling', good: 'bread', price: Math.round(s.market.bread!.price * 0.85) }] : []));
+  /** Уровень «Потолок» без вмешательства: унаследованный потолок ниже себестоимости ведёт к голоду. */
+  const famine = play(ceilingLevel);
 
   it('шоки уровня срабатывают в своём ходу и записываются как события, а не решения игрока', () => {
-    expect(levelEvents(harvest, 3)).toEqual([{ type: 'shock', shock: 'harvestFailure' }]);
-    expect(levelEvents(harvest, 4)).toEqual([]);
-    expect(passive.history[3]!.events).toEqual([{ type: 'shock', shock: 'harvestFailure' }]);
-    expect(passive.history[3]!.state.activeShocks.map((s) => s.id)).toContain('harvestFailure');
+    expect(levelEvents(harvest, SHOCK_TURN)).toEqual([{ type: 'shock', shock: 'harvestFailure' }]);
+    expect(levelEvents(harvest, SHOCK_TURN + 1)).toEqual([]);
+    expect(passive.history[SHOCK_TURN]!.events).toEqual([{ type: 'shock', shock: 'harvestFailure' }]);
+    expect(passive.history[SHOCK_TURN]!.state.activeShocks.map((s) => s.id)).toContain('harvestFailure');
     expect(passive.history.every((h) => h.actions.length === 0)).toBe(true);
   });
 
@@ -38,9 +43,9 @@ describe('контроллер уровня (GDD 4, 9)', () => {
     expect(advanceLevel(passive, data, harvest, 3).history).toHaveLength(harvest.turns + 1);
     const st = status(harvest, passive);
     expect(st.outcome).toBe('completed');
-    expect(st.stars).toBe(1);
-    expect(st.goals.find((g) => g.id === 'cpi')?.state).toBe('met');
-    expect(st.goals.find((g) => g.id === 'cpiStrict')?.state).toBe('failed');
+    // Без резерва дефицит хлеба выше порога первой звезды — звёзд нет, хотя уровень закончен.
+    expect(st.goals.find((g) => g.id === 'noHunger')?.state).toBe('failed');
+    expect(st.stars).toBe(0);
   });
 
   it('звезда N — только если получены все младшие', () => {
@@ -53,16 +58,16 @@ describe('контроллер уровня (GDD 4, 9)', () => {
   });
 
   it('катастрофа: голод при потолке ниже себестоимости — проигрыш, игра останавливается', () => {
-    const st = status(harvest, ceiling);
+    const st = status(ceilingLevel, famine);
     expect(st.outcome).toBe('defeated');
     expect(st.defeat).toMatchObject({ reason: 'famine' });
-    expect(ceiling.history).toHaveLength(st.defeat!.turn + 1);
+    expect(famine.history).toHaveLength(st.defeat!.turn + 1);
     expect(st.stars).toBe(0);
     expect(st.goals.every((g) => g.state === 'failed')).toBe(true);
     const c = data.balance.catastrophe;
-    const famine = st.defeat as { province: string; turn: number };
-    for (let t = famine.turn - c.famineTurns + 1; t <= famine.turn; t++) {
-      expect(ceiling.history[t]!.state.metrics.provinceShortage[famine.province]![c.famineGood]).toBeGreaterThanOrEqual(c.famineShortage);
+    const where = st.defeat as { province: string; turn: number };
+    for (let t = where.turn - c.famineTurns + 1; t <= where.turn; t++) {
+      expect(famine.history[t]!.state.metrics.provinceShortage[where.province]![c.famineGood]).toBeGreaterThanOrEqual(c.famineShortage);
     }
   });
 

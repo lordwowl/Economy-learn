@@ -3,7 +3,7 @@ import { getGameData, getLevels, getScenario, type GoalCondition } from '../../s
 import { contextFromState } from '../../src/game/explain';
 import { advanceLevel, evaluateLevel, startLevel } from '../../src/game/level';
 import { levelReport } from '../../src/game/report';
-import { addDecision, currentState } from '../../src/game/session';
+import { currentState } from '../../src/game/session';
 import { chainChange, describeChainLink, describeDefeat, describeGoal, describeGoalStatus } from '../../src/ui/labels';
 
 const data = getGameData();
@@ -32,20 +32,25 @@ describe('тексты целей и отчёта', () => {
   });
 
   it('отчёт: статусы целей, катастрофа и звенья цепочки — без сырых ключей', () => {
-    let s = startLevel(data, harvest, getScenario(harvest.scenario));
-    while (evaluateLevel(harvest, s.history, data.balance).outcome === 'playing') {
-      const st = currentState(s);
-      if (st.turn === 1) s = addDecision(s, { type: 'setPriceCeiling', good: 'bread', price: Math.round(st.market.bread!.price * 0.85) });
-      s = advanceLevel(s, data, harvest, 1);
-    }
-    const report = levelReport(harvest, s.history, data.balance);
-    const start = s.history[0]!.state;
+    // Уровень «Потолок» без вмешательства заканчивается голодом; уровень «Неурожай» даёт цепочку до шока.
+    const ceilingLevel = getLevels().find((l) => l.id === 'ceiling')!;
+    let s = startLevel(data, ceilingLevel, getScenario(ceilingLevel.scenario));
+    while (evaluateLevel(ceilingLevel, s.history, data.balance).outcome === 'playing') s = advanceLevel(s, data, ceilingLevel, 1);
+    let h = startLevel(data, harvest, getScenario(harvest.scenario));
+    while (evaluateLevel(harvest, h.history, data.balance).outcome === 'playing') h = advanceLevel(h, data, harvest, 1);
+    const report = levelReport(ceilingLevel, s.history, data.balance);
+    const shock = levelReport(harvest, h.history, data.balance);
     const last = currentState(s);
     const texts = [
       ...report.status.goals.map(describeGoalStatus),
       describeDefeat(report.status.defeat!, last, data.balance),
-      ...report.chains.flatMap((c) => c.links.flatMap((l) => Object.values(describeChainLink(l, start, contextFromState(last))))),
+      ...[report, shock].flatMap((r, i) => {
+        const run = i === 0 ? s : h;
+        return r.chains.flatMap((c) => c.links.flatMap((l) => Object.values(describeChainLink(l, run.history[0]!.state, contextFromState(currentState(run))))));
+      }),
     ];
+    expect(texts.join('\n')).toMatch(/Недопроизведено «Зерно» за уровень: .+ ед\./);
+    expect(texts.join('\n')).toMatch(/Шок: Неурожай/);
     for (const text of texts) expect(complete(text), text).toBe(true);
     expect(texts.join('\n')).toMatch(/Голод: в провинции «.+» дефицит товара «Хлеб» не меньше 50%/);
   });

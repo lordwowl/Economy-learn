@@ -21,8 +21,7 @@ import { XrayView } from './XrayView';
 /** График, который открывается из «Почему?» у показателя верхней панели. */
 const TOP_CHART: Partial<Record<TopMetric, ChartMetric>> = { cpi: 'cpi', unemployment: 'unemployment', 'budget.balance': 'budgetBalance' };
 
-/** Песочница: сценарий и seed без уровня. */
-const SANDBOX_SCENARIO = 'baseline';
+/** Песочница: seed без уровня. */
 const SEED = 42;
 const FAST_FORWARD_TURNS = 3;
 
@@ -59,14 +58,16 @@ function isNoop(action: Action, state: WorldState): boolean {
 interface Props {
   /** Уровень кампании; без него — песочница (без целей и срока). */
   level?: Level;
+  /** Сценарий песочницы (data/scenarios). */
+  scenario?: string;
   onBack: () => void;
   onReplay: () => void;
 }
 
 /** Основной экран (GDD 7): верхняя панель, карта, панели «Строить»/«Политика», ход и сводка месяца. */
-export function GameScreen({ level, onBack, onReplay }: Props) {
+export function GameScreen({ level, scenario: sandboxScenario = 'baseline', onBack, onReplay }: Props) {
   const data = getGameData();
-  const scenario = getScenario(level?.scenario ?? SANDBOX_SCENARIO);
+  const scenario = getScenario(level?.scenario ?? sandboxScenario);
   const [session, setSession] = useState<Session>(() => (level ? startLevel(data, level, scenario) : createSession(data, scenario, SEED)));
   const status = useMemo(() => (level ? evaluateLevel(level, session.history, data.balance) : undefined), [level, session.history, data]);
   const finished = status !== undefined && status.outcome !== 'playing';
@@ -184,9 +185,9 @@ export function GameScreen({ level, onBack, onReplay }: Props) {
         </div>
         <div class={panelOpen ? 'game__panel game__panel--open' : 'game__panel'}>
           {tab === 'policy' && (
-            <PolicyPanel state={state} data={data} decisions={session.decisions} onDecide={decide} {...(level ? { levers: level.levers } : {})} />
+            <PolicyPanel state={state} data={data} decisions={session.decisions} onDecide={decide} {...(level ? { levers: level.levers } : { shocks: true })} />
           )}
-          {tab === 'build' && <BuildPanel state={state} data={data} onDecide={decide} {...(level ? { allowed: level.buildings } : {})} />}
+          {tab === 'build' && <BuildPanel state={state} data={data} onDecide={decide} allowed={level ? level.buildings : data.buildings.map((b) => b.id)} />}
           {tab === 'charts' && (
             <div class="panel">
               <div class="segmented" role="group">

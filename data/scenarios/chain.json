@@ -1,0 +1,14 @@
+{
+  "extends": "baseline",
+  "firms": [
+    { "building": "farm", "province": "north", "count": 5 },
+    { "building": "farm", "province": "south", "count": 5 },
+    { "building": "mill", "province": "north", "count": 2 },
+    { "building": "mill", "province": "center", "count": 3 },
+    { "building": "mill", "province": "south", "count": 2 },
+    { "building": "bakery", "province": "north", "count": 5 },
+    { "building": "bakery", "province": "center", "count": 4 },
+    { "building": "bakery", "province": "south", "count": 5 },
+    { "building": "refinery", "province": "center", "count": 4 }
+  ]
+}

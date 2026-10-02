@@ -920,3 +920,31 @@ button:focus-visible {
 .chain__link--decision {
   border: 2px solid var(--accent);
 }
+
+/* ---------- песочница: выбор стартовой экономики ---------- */
+
+.choices {
+  margin: 8px 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.choice input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}

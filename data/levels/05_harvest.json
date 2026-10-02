@@ -3,18 +3,16 @@
   "number": 5,
   "titleKey": "level.harvest.title",
   "briefingKey": "level.harvest.briefing",
-  "scenario": "baseline",
+  "scenario": "harvest",
   "seed": 42,
   "turns": 24,
-  "levers": ["keyRate", "taxes", "transfers", "subsidies", "priceCeilings", "reserve"],
-  "buildings": ["roadLane", "warehouse", "elevator", "truckFleet"],
-  "events": [{ "turn": 3, "shock": "harvestFailure" }],
+  "levers": ["taxes", "transfers", "subsidies", "priceCeilings", "reserve"],
+  "buildings": ["warehouse", "elevator"],
+  "events": [{ "turn": 4, "shock": "harvestFailure" }],
   "goals": [
-    { "id": "noHunger", "star": 1, "condition": { "kind": "metric", "metric": "maxShortage.bread", "op": "<=", "value": 0.4, "when": "always" } },
-    { "id": "cpi", "star": 1, "condition": { "kind": "metric", "metric": "cpi", "op": "<=", "value": 125, "when": "end" } },
-    { "id": "jobs", "star": 2, "condition": { "kind": "metric", "metric": "unemployment", "op": "<=", "value": 0.08, "when": "end" } },
-    { "id": "cpiStrict", "star": 2, "condition": { "kind": "metric", "metric": "cpi", "op": "<=", "value": 110, "when": "end" } },
-    { "id": "noCeiling", "star": 3, "condition": { "kind": "noDecision", "decision": "setPriceCeiling" } }
+    { "id": "noHunger", "star": 1, "condition": { "kind": "metric", "metric": "maxShortage.bread", "op": "<=", "value": 0.25, "when": "always" } },
+    { "id": "cpi", "star": 2, "condition": { "kind": "metric", "metric": "cpi", "op": "<=", "value": 110, "when": "end" } },
+    { "id": "jobs", "star": 3, "condition": { "kind": "metric", "metric": "unemployment", "op": "<=", "value": 0.2, "when": "always" } }
   ],
   "questions": ["level.harvest.q1", "level.harvest.q2", "level.harvest.q3"]
 }

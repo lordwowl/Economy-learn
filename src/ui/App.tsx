@@ -1,10 +1,38 @@
 import { useState } from 'preact/hooks';
-import { getLevels, type Level } from '../data';
-import { t } from '../i18n';
+import { getLevels, getScenarios, type Level } from '../data';
+import { t, translate } from '../i18n';
 import { GameScreen } from './GameScreen';
 import { Briefing, levelTitle } from './LevelViews';
 
-type Screen = { kind: 'menu' } | { kind: 'briefing'; level: Level } | { kind: 'game'; level?: Level; run: number };
+type Screen = { kind: 'menu' } | { kind: 'briefing'; level: Level } | { kind: 'sandbox' } | { kind: 'game'; level?: Level; scenario?: string; run: number };
+
+/** Облегчённая песочница (GDD 8): выбор стартовой экономики. */
+function SandboxSetup({ onStart, onBack }: { onStart: (scenario: string) => void; onBack: () => void }) {
+  const [scenario, setScenario] = useState('baseline');
+  return (
+    <main class="briefing">
+      <h1 class="briefing__title">{t('sandbox.title')}</h1>
+      <p>{t('menu.sandboxHint')}</p>
+      <fieldset class="choices">
+        <legend class="section__title">{t('sandbox.scenario')}</legend>
+        {Object.keys(getScenarios()).map((id) => (
+          <label key={id} class="choice">
+            <input type="radio" name="scenario" value={id} checked={scenario === id} onChange={() => setScenario(id)} />
+            <span>{translate(`scenario.${id}`)}</span>
+          </label>
+        ))}
+      </fieldset>
+      <div class="briefing__actions">
+        <button type="button" class="turnbar__secondary" onClick={onBack}>
+          {t('report.menu')}
+        </button>
+        <button type="button" class="turnbar__primary" onClick={() => onStart(scenario)}>
+          {t('sandbox.start')}
+        </button>
+      </div>
+    </main>
+  );
+}
 
 export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: 'menu' });
@@ -13,14 +41,18 @@ export function App() {
   if (screen.kind === 'briefing') {
     return <Briefing level={screen.level} onBack={menu} onStart={() => setScreen({ kind: 'game', level: screen.level, run: 0 })} />;
   }
+  if (screen.kind === 'sandbox') {
+    return <SandboxSetup onBack={menu} onStart={(scenario) => setScreen({ kind: 'game', scenario, run: 0 })} />;
+  }
   if (screen.kind === 'game') {
-    const { level, run } = screen;
+    const { level, scenario, run } = screen;
     return (
       <GameScreen
         key={run}
         {...(level ? { level } : {})}
+        {...(scenario ? { scenario } : {})}
         onBack={menu}
-        onReplay={() => setScreen(level ? { kind: 'game', level, run: run + 1 } : { kind: 'game', run: run + 1 })}
+        onReplay={() => setScreen({ ...screen, run: run + 1 })}
       />
     );
   }
@@ -40,7 +72,7 @@ export function App() {
           </li>
         ))}
         <li>
-          <button type="button" class="menu__button menu__button--secondary" onClick={() => setScreen({ kind: 'game', run: 0 })}>
+          <button type="button" class="menu__button menu__button--secondary" onClick={() => setScreen({ kind: 'sandbox' })}>
             {t('menu.sandbox')}
             <small>{t('menu.sandboxHint')}</small>
           </button>

@@ -219,7 +219,7 @@ describe('уровни', () => {
     expect(levelIssues((l) => (l.scenario = 'nope'))).toContain('test.json: неизвестный сценарий "nope"');
     expect(levelIssues((l) => (l.events = [{ turn: 3, shock: 'meteor' }]))).toContain('test.json: неизвестный шок "meteor"');
     expect(levelIssues((l) => (l.events = [{ turn: 99, shock: 'harvestFailure' }])).join('\n')).toMatch(/позже конца уровня/);
-    expect(levelIssues((l) => (l.buildings = ['farm'])).join('\n')).toMatch(/нельзя строить/);
+    expect(levelIssues((l) => (l.buildings = ['castle'])).join('\n')).toMatch(/нет в buildings.json/);
     expect(levelIssues((l) => (goals(l)[0]!.condition.metric = 'price.coal')).join('\n')).toMatch(/неизвестный товар "coal"/);
     expect(levelIssues((l) => (goals(l)[0]!.condition.metric = 'happiness')).join('\n')).toMatch(/неизвестный показатель/);
     expect(levelIssues((l) => (goals(l)[0]!.condition.when = 'streak')).join('\n')).toMatch(/для streak нужно turns/);
