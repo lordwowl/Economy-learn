@@ -24,6 +24,7 @@ import { legKey, routeCapacity } from './systems/logistics';
 import { nextMarkup, nextPriceBreakdown, unitCostBreakdown, withCeiling, withoutCeiling } from './systems/pricing';
 import { affordableRuns, costPerRun, coverage, feasibleRuns, lossOutputFactor, plannedRuns } from './systems/production';
 import { clearMarket } from './market';
+import { freeSpace } from './systems/reserve';
 import { Trade, type TradeBid } from './trade';
 import { mean } from './units';
 
@@ -78,6 +79,23 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       }
       break;
     }
+    case 'buildStorage': {
+      const building = data.buildings.find((b) => b.id === action.building);
+      if (building?.kind !== 'storage') throw new Error(`"${action.building}" не склад`);
+      if (!state.provinces.some((p) => p.id === action.province)) throw new Error(`нет провинции "${action.province}"`);
+      addSpending(state, BUDGET.construction, building.cost);
+      payHouseholds(state, building.cost, (p) => p.households.laborForce);
+      const id = `${building.id}-${action.province}-t${turn}`;
+      state.reserve.storages.push({ id, building: building.id, province: action.province, ready: false });
+      state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'storageReady', storage: id });
+      break;
+    }
+    case 'reserveBuy':
+    case 'reserveRelease':
+      // Исполняются в торговле этого хода (см. step).
+      if (!state.provinces.some((p) => p.id === action.province)) throw new Error(`нет провинции "${action.province}"`);
+      if (!(action.good in state.market)) throw new Error(`нет товара "${action.good}"`);
+      break;
     case 'setSubsidy': {
       const g = state.government;
       const delta = action.perUnit - (g.announcedSubsidies[action.good] ?? 0);
@@ -130,6 +148,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       subsidies[effect.good] = (subsidies[effect.good] ?? 0) + effect.delta;
     }
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
+    if (effect.type === 'storageReady') {
+      const storage = state.reserve.storages.find((s) => s.id === effect.storage);
+      if (storage) storage.ready = true;
+    }
     if (effect.type === 'firmReady') {
       const firm = state.firms.find((f) => f.id === effect.firm);
       if (firm) {
@@ -169,6 +191,14 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
 
   // 3. Топливо перевозчика и рынок входов.
   const trade = new Trade(state, data, recipeOf, laborForce - laborRequired);
+  // Интервенции из резерва: по текущей цене провинции, но не выше потолка.
+  for (const action of actions) {
+    if (action.type !== 'reserveRelease') continue;
+    const stock = state.reserve.stock[action.province]?.[action.good] ?? 0;
+    const market = state.market[action.good]!;
+    const price = Math.min(market.provinces[action.province]?.price ?? market.price, state.government.priceCeilings[action.good] ?? Infinity);
+    trade.offerFromReserve(action.good, action.province, Math.min(Math.max(0, action.quantity), stock), price);
+  }
   const logisticsCfg = balance.logistics;
   const expectedWork = mean(state.logistics.workHistory);
   const fuelTarget = expectedWork * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
@@ -288,6 +318,18 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   const shortage: Record<GoodId, number> = {};
   const provinceShortage: Record<string, Record<GoodId, number>> = {};
   for (const p of state.provinces) provinceShortage[p.id] = {};
+  // Закупки в резерв: государство — покупатель на рынке провинции, не больше свободного места.
+  const reserveBuyer = (province: string) => `reserve.${province}`;
+  for (const action of actions) {
+    if (action.type !== 'reserveBuy') continue;
+    const room = freeSpace(state.reserve, data.buildings, action.province, action.good);
+    const quantity = Math.min(Math.max(0, action.quantity), room);
+    if (quantity <= 0) continue;
+    const bids = consumerBids.get(action.good) ?? [];
+    bids.push({ buyer: reserveBuyer(action.province), province: action.province, quantity, budget: Infinity });
+    consumerBids.set(action.good, bids);
+  }
+
   // Под потолком фирмы придерживают часть склада для чёрного рынка — тем больше, чем сильнее был дефицит.
   const ceilings = state.government.priceCeilings;
   const heldBack = new Map<string, number>();
@@ -323,6 +365,17 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     householdDemand[good] = demanded;
     householdPurchases[good] = purchased + blackMarketSales(good, result);
     shortage[good] = demanded > 0 ? unmet / demanded : 0;
+  }
+  for (const action of actions) {
+    if (action.type !== 'reserveBuy') continue;
+    const outcome = consumerOutcomes.get(action.good);
+    const buyer = reserveBuyer(action.province);
+    const got = outcome?.bought.get(buyer) ?? 0;
+    if (got <= 0) continue;
+    const stock = (state.reserve.stock[action.province] ??= {});
+    stock[action.good] = (stock[action.good] ?? 0) + got;
+    addSpending(state, BUDGET.reserve, outcome?.paid.get(buyer) ?? 0);
+    outcome?.bought.delete(buyer);
   }
   for (const firm of state.firms) {
     const q = heldBack.get(firm.id) ?? 0;

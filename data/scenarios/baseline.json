@@ -97,5 +97,9 @@
       "length": 8,
       "lanes": 0
     }
-  ]
+  ],
+  "reserve": {
+    "storages": [],
+    "stock": []
+  }
 }

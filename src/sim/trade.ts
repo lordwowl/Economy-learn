@@ -36,6 +36,9 @@ export interface TradeOutcome {
   unmetByProvince: Record<string, number>;
 }
 
+/** Продавец «госрезерв» в местной торговле. */
+export const RESERVE_SELLER = 'reserve';
+
 /** Сделки в провинции за ход: Σ количества и Σ количества × компоненты цены. */
 interface Tally {
   quantity: number;
@@ -73,6 +76,10 @@ export class Trade {
   private readonly capacityLeft: Record<string, number> = {};
   private readonly firmsByGood = new Map<GoodId, Firm[]>();
   private readonly fuelPrice: number;
+  /** Интервенции этого хода: reserveOffers[товар][провинция] = { осталось продать, цена }. */
+  private readonly reserveOffers: Record<GoodId, Record<string, { quantity: number; price: number }>> = {};
+  /** Продано из резерва за ход: [товар][провинция]. */
+  readonly reserveSold: Record<GoodId, Record<string, number>> = {};
 
   constructor(
     private readonly state: WorldState,
@@ -120,6 +127,13 @@ export class Trade {
     this.logisticsFuelCost += result.paid.get('logistics') ?? 0;
   }
 
+  /** Интервенция: резерв продаёт товар на местном рынке провинции (в обеих фазах, пока не продаст). */
+  offerFromReserve(good: GoodId, province: string, quantity: number, price: number): void {
+    if (quantity <= 0) return;
+    const byProvince = (this.reserveOffers[good] ??= {});
+    byProvince[province] = { quantity: (byProvince[province]?.quantity ?? 0) + quantity, price };
+  }
+
   /** Сколько пропускной способности дорог доступно фазе: доля по заявкам прошлого хода, остаток — следующей фазе. */
   private phaseCapacity(phase: TradePhase): Record<string, number> {
     if (phase === 'consumer') return { ...this.capacityLeft };
@@ -148,8 +162,12 @@ export class Trade {
         const local = bids.filter((b) => b.province === province.id);
         if (local.length === 0) continue;
         const localSellers = sellers.filter((f) => f.province === province.id);
-        const result = clearMarket(this.offers(localSellers, good), local);
+        const reserve = this.reserveOffers[good]?.[province.id];
+        const offers = this.offers(localSellers, good);
+        if (reserve) offers.push({ seller: RESERVE_SELLER, price: reserve.price, quantity: reserve.quantity });
+        const result = clearMarket(offers, local);
         for (const firm of localSellers) this.sell(firm, good, result.sold.get(firm.id) ?? 0, province.id, 0);
+        if (reserve) this.sellFromReserve(good, province.id, result.sold.get(RESERVE_SELLER) ?? 0, reserve);
         const fill = result.demanded > 0 ? (result.demanded - result.unmetBySupply) / result.demanded : 0;
         const left: TradeBid[] = [];
         for (const bid of local) {
@@ -209,6 +227,20 @@ export class Trade {
       for (const v of Object.values(outcome.unmetByProvince)) this.unmetByGood[good] = (this.unmetByGood[good] ?? 0) + v;
     }
     return outcomes;
+  }
+
+  /** Продажа из резерва: деньги — в бюджет, в цене — компонента reserve. */
+  private sellFromReserve(good: GoodId, province: string, quantity: number, offer: { quantity: number; price: number }): void {
+    if (quantity <= 0) return;
+    offer.quantity -= quantity;
+    const sold = (this.reserveSold[good] ??= {});
+    sold[province] = (sold[province] ?? 0) + quantity;
+    const stock = (this.state.reserve.stock[province] ??= {});
+    stock[good] = Math.max(0, (stock[good] ?? 0) - quantity);
+    addRevenue(this.state, BUDGET.reserveSales, quantity * offer.price);
+    const tally = ((this.tallies[good] ??= {})[province] ??= { quantity: 0, weighted: {} });
+    tally.quantity += quantity;
+    tally.weighted[COMPONENT.reserve] = (tally.weighted[COMPONENT.reserve] ?? 0) + quantity * offer.price;
   }
 
   /** Продажа «из-под полы»: товар уже отложен со склада, налога нет, премия к официальной цене — компонента blackMarket. */

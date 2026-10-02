@@ -5,7 +5,7 @@ import goods from '../../data/goods.json';
 import recipes from '../../data/recipes.json';
 import ru from '../../src/i18n/ru.json';
 import scenario from '../../data/scenarios/baseline.json';
-import { GameDataError, getGameData, loadGameData, loadScenario, type RawGameData } from '../../src/data';
+import { GameDataError, getGameData, loadGameData, loadScenario, type RawGameData, type Scenario } from '../../src/data';
 
 const raw = (): RawGameData => structuredClone({ balance, goods, recipes, buildings });
 
@@ -137,7 +137,7 @@ describe('сценарии', () => {
   });
 
   it('ловит неизвестное здание, провинцию и рабочую силу больше населения', () => {
-    const bad = structuredClone(scenario);
+    const bad = structuredClone(scenario) as Scenario;
     bad.firms.push({ building: 'warehouse', province: 'nowhere', count: 1 });
     bad.provinces[0]!.laborForce = bad.provinces[0]!.population + 1;
     const issues = scenarioIssues(bad).join('\n');
@@ -146,8 +146,15 @@ describe('сценарии', () => {
     expect(issues).toMatch(/рабочая сила больше населения/);
   });
 
+  it('ловит запас резерва, который негде хранить', () => {
+    const bad = structuredClone(scenario) as Scenario;
+    bad.reserve.storages.push({ building: 'elevator', province: 'north' });
+    bad.reserve.stock.push({ province: 'north', good: 'bread', quantity: 10 });
+    expect(scenarioIssues(bad).join('\n')).toMatch(/"bread" в провинции "north" негде хранить/);
+  });
+
   it('ловит дорогу в неизвестную провинцию, петлю и дубль', () => {
-    const bad = structuredClone(scenario);
+    const bad = structuredClone(scenario) as Scenario;
     bad.routes.push({ id: 'toNowhere', a: 'north', b: 'nowhere', length: 1, lanes: 1 });
     bad.routes.push({ id: 'loop', a: 'south', b: 'south', length: 1, lanes: 1 });
     bad.routes.push({ id: 'twin', a: 'center', b: 'north', length: 2, lanes: 1 });

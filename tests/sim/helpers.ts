@@ -1,13 +1,13 @@
 import scenarioRaw from '../../data/scenarios/baseline.json';
-import { getGameData, loadScenario, type GameData } from '../../src/data';
+import { getGameData, loadScenario, type GameData, type Scenario } from '../../src/data';
 import { createInitialState, Rng, step, type Action, type CauseEvent, type WorldState } from '../../src/sim';
 
 export const SEED = 42;
 
-export type ScenarioPatch = (scenario: typeof scenarioRaw) => void;
+export type ScenarioPatch = (scenario: Scenario) => void;
 
 export function baseline(data: GameData = getGameData(), patch?: ScenarioPatch): WorldState {
-  const scenario = structuredClone(scenarioRaw);
+  const scenario = structuredClone(scenarioRaw) as Scenario;
   patch?.(scenario);
   return createInitialState(data, loadScenario(scenario, data));
 }

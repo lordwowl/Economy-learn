@@ -134,12 +134,27 @@ export interface Bank {
   writtenOff: number;
 }
 
+export interface Storage {
+  id: string;
+  building: string;
+  province: string;
+  /** Достроен. */
+  ready: boolean;
+}
+
+/** Госрезерв (GDD 3, 5.11): склады и запасы по провинциям. */
+export interface Reserve {
+  storages: Storage[];
+  stock: Record<string, Record<GoodId, number>>;
+}
+
 export type PendingEffect =
   | { type: 'demandRate'; delta: number }
   | { type: 'creditRate'; delta: number }
   | { type: 'subsidy'; good: GoodId; delta: number }
   | { type: 'roadLane'; route: string }
-  | { type: 'firmReady'; firm: string; capacity: number };
+  | { type: 'firmReady'; firm: string; capacity: number }
+  | { type: 'storageReady'; storage: string };
 
 export interface Metrics {
   cpi: number;
@@ -189,6 +204,7 @@ export interface WorldState {
   market: Record<GoodId, MarketGood>;
   government: Government;
   bank: Bank;
+  reserve: Reserve;
   expectations: {
     /** π_a, месячная. */
     adaptive: number;
@@ -209,4 +225,9 @@ export type Action =
   | { type: 'setTax'; tax: TaxKind; rate: number }
   | { type: 'setTransfers'; perCapita: number }
   | { type: 'setSubsidy'; good: GoodId; perUnit: number }
-  | { type: 'setPriceCeiling'; good: GoodId; price: number | null };
+  | { type: 'setPriceCeiling'; good: GoodId; price: number | null }
+  | { type: 'buildStorage'; building: string; province: string }
+  /** Закупка в резерв на рынке провинции в этом ходу. */
+  | { type: 'reserveBuy'; good: GoodId; province: string; quantity: number }
+  /** Интервенция: продажа из резерва на рынке провинции в этом ходу. */
+  | { type: 'reserveRelease'; good: GoodId; province: string; quantity: number };

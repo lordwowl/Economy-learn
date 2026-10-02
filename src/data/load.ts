@@ -137,6 +137,18 @@ export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): S
     if (!producers.has(firm.building)) issues.push(`${file}: "${firm.building}" не производственное здание`);
     if (!provinceIds.has(firm.province)) issues.push(`${file}: неизвестная провинция "${firm.province}"`);
   }
+  const storages = new Map(data.buildings.filter((b) => b.kind === 'storage').map((b) => [b.id, b]));
+  for (const s of scenario.reserve.storages) {
+    if (!storages.has(s.building)) issues.push(`${file}: резерв: "${s.building}" не склад`);
+    if (!provinceIds.has(s.province)) issues.push(`${file}: резерв: неизвестная провинция "${s.province}"`);
+  }
+  for (const item of scenario.reserve.stock) {
+    const fits = scenario.reserve.storages.some(
+      (s) => s.province === item.province && storages.get(s.building)?.kind === 'storage' && storages.get(s.building)!.storedGoods.includes(item.good),
+    );
+    if (!fits) issues.push(`${file}: резерв: "${item.good}" в провинции "${item.province}" негде хранить`);
+  }
+
   checkUniqueIds(file, scenario.routes, issues);
   const pairs = new Set<string>();
   for (const route of scenario.routes) {

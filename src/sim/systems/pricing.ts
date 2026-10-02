@@ -23,6 +23,7 @@ export const COMPONENT = {
   subsidy: 'subsidy',
   priceCeiling: 'priceCeiling',
   blackMarket: 'blackMarket',
+  reserve: 'reserve',
   markup: 'markup',
   expectations: 'expectations',
 } as const;

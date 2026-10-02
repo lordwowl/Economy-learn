@@ -13,6 +13,8 @@ export const BUDGET = {
   transfers: 'transfers',
   construction: 'construction',
   subsidies: 'subsidies',
+  reserve: 'reserve',
+  reserveSales: 'reserveSales',
   interest: 'interest',
 } as const;
 

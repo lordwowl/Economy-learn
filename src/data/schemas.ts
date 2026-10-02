@@ -260,6 +260,11 @@ export const scenarioSchema = z.strictObject({
       count: z.number().int().positive(),
     }),
   ),
+  /** Госрезерв на старте: склады и запасы в них. */
+  reserve: z.strictObject({
+    storages: z.array(z.strictObject({ building: id, province: id })),
+    stock: z.array(z.strictObject({ province: id, good: id, quantity: positive })),
+  }),
   /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
   routes: z.array(
     z.strictObject({

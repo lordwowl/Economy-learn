@@ -388,6 +388,14 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       spending: {},
     },
     bank: { cash: 0, writtenOff: 0 },
+    reserve: {
+      storages: scenario.reserve.storages.map((s, i) => ({ id: `${s.building}-${s.province}-${i + 1}`, building: s.building, province: s.province, ready: true })),
+      stock: scenario.reserve.stock.reduce<Record<string, Record<GoodId, number>>>((acc, item) => {
+        const byGood = (acc[item.province] ??= {});
+        byGood[item.good] = (byGood[item.good] ?? 0) + item.quantity;
+        return acc;
+      }, {}),
+    },
     expectations: { adaptive: monthlyTarget, expected: monthlyTarget, trust: scenario.trust },
     pending: emptyQueue(),
     cpiHistory: [100],
