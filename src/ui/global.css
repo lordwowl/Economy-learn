@@ -944,6 +944,7 @@ button:focus-visible {
 }
 
 .choice input {
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
   accent-color: var(--accent);
@@ -960,4 +961,74 @@ button:focus-visible {
 .menu__button .stars,
 .menu__button .stars__empty {
   color: inherit;
+}
+
+/* ---------- код сценария ---------- */
+
+.menu__codes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.field input {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+}
+
+.code-input {
+  font-family: ui-monospace, 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 1.25rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.field__error {
+  margin: 0;
+  color: var(--bad);
+}
+
+.code-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--card);
+  text-align: center;
+}
+
+.code-card__code {
+  margin: 0;
+  font-family: ui-monospace, 'Cascadia Mono', 'DejaVu Sans Mono', monospace;
+  font-size: clamp(1.5rem, 7vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.code-card__url {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.qr {
+  width: min(240px, 70vw);
+  height: auto;
+  border-radius: 8px;
 }
