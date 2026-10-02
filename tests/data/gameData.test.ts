@@ -55,9 +55,8 @@ describe('данные игры из data/', () => {
     }
   });
 
-  it('у каждого здания своя форма или вид (цвет не единственный носитель смысла)', () => {
-    const producers = getGameData().buildings.filter((b) => b.kind === 'producer');
-    const shapes = producers.map((b) => b.shape);
+  it('у каждого здания своя форма (цвет не единственный носитель смысла)', () => {
+    const shapes = getGameData().buildings.map((b) => b.shape);
     expect(new Set(shapes).size).toBe(shapes.length);
   });
 });

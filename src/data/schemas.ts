@@ -63,7 +63,8 @@ export const producerBuildingSchema = z.strictObject({
 export const storageBuildingSchema = z.strictObject({
   ...buildingBase,
   kind: z.literal('storage'),
-  shape: z.literal('triangle'),
+  /** Склад — треугольник, элеватор — перевёрнутый треугольник (GDD 7). */
+  shape: z.enum(['triangle', 'triangleDown']),
   storageCapacity: positive,
   storedGoods: z.array(id).min(1),
   cost: nonNegative,
