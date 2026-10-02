@@ -104,6 +104,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const wage = scenario.wage;
   const m0 = balance.firms.initialMarkup;
   const cfg = balance.logistics;
+  const salesTax = scenario.taxes.sales;
   const { firms, recipeByGood } = createFirms(data, scenario);
   const provinceIds = scenario.provinces.map((p) => p.id);
   const population = scenario.provinces.reduce((sum, p) => sum + p.population, 0);
@@ -201,7 +202,11 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       const cost = unitCostBreakdown(recipe, inputs, wage);
       let c = 0;
       for (const v of Object.values(cost)) c += v;
-      producerPrice[good][p] = { price: c * (1 + m0), breakdown: { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.expectations]: 0 } };
+      const price = (c * (1 + m0)) / (1 - salesTax);
+      producerPrice[good][p] = {
+        price,
+        breakdown: { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.salesTax]: salesTax * price, [COMPONENT.expectations]: 0 },
+      };
     }
     // Средняя цена производителей (взвешена по выпуску) — для провинций без сделок и для тарифа.
     const average: Breakdown = {};
@@ -255,8 +260,10 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     market[good] = { price, breakdown: national, referencePrice: price, provinces };
   }
 
-  // 4. Фирмы.
+  // 4. Фирмы. Попутно — стартовые доходы бюджета (для сбалансированных трансфертов) и ВВП.
   let laborDemand = plan.logisticsLabor;
+  let revenue = 0;
+  let gdp = 0;
   for (const firm of firms) {
     const recipe = recipeFor(firm);
     const good = recipe.output.good;
@@ -265,6 +272,13 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     const prices: Record<GoodId, number> = {};
     for (const g of order) prices[g] = marketPrice[g]![firm.province]!.price;
     laborDemand += runs * recipe.labor;
+    const sales = orders * producerPrice[good]![firm.province]!.price;
+    let inputs = 0;
+    for (const input of recipe.inputs) inputs += runs * input.amount * (prices[input.good] ?? 0);
+    const profit = sales * (1 - salesTax) - inputs - runs * recipe.labor * wage;
+    const profitTax = Math.max(0, profit) * scenario.taxes.profit;
+    revenue += sales * salesTax + profitTax + (firm.owner === 'state' ? profit - profitTax : 0);
+    gdp += sales - inputs;
     firm.ordersHistory = Array.from({ length: balance.firms.salesAverageTurns }, () => orders);
     firm.inventory = { [good]: balance.firms.targetCoverage * orders };
     firm.cash = balance.firms.cashBufferTurns * runs * costPerRun(recipe, prices, wage);
@@ -274,6 +288,9 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     firm.lastRuns = runs;
     firm.lastSales = orders;
   }
+
+  for (const list of Object.values(plan.shipments)) for (const sh of list) gdp += sh.quantity * tariffOf(sh.path);
+  gdp -= plan.work * cfg.fuelPerUnitLength * fuelPrice;
 
   const logistics: Logistics = {
     cash: balance.firms.cashBufferTurns * (plan.work * cfg.fuelPerUnitLength * fuelPrice + plan.logisticsLabor * wage),
@@ -289,12 +306,14 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   if (s <= 0) throw new Error('при стартовой ставке домохозяйства ничего не тратят');
   const laborForce = scenario.provinces.reduce((sum, p) => sum + p.laborForce, 0);
   const employment = Math.min(laborDemand, laborForce);
+  revenue += employment * wage * scenario.taxes.income;
+  const transfersPerCapita = scenario.transfersPerCapita === 'balanced' ? revenue / population : scenario.transfersPerCapita;
   const provinces: Province[] = scenario.provinces.map((p) => {
     let perCapita = 0;
     for (const [good, params] of Object.entries(balance.demand.goods)) {
       perCapita += marketPrice[good]![p.id]!.price * params.basePerCapita;
     }
-    const wageIncome = (employment * wage * p.laborForce) / laborForce;
+    const wageIncome = (employment * wage * (1 - scenario.taxes.income) * p.laborForce) / laborForce;
     return {
       id: p.id,
       nameKey: p.nameKey,
@@ -337,6 +356,8 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     provinceShortage: Object.fromEntries(provinceIds.map((p) => [p, zeroByGood()])),
     routes: routeMetrics,
     logisticsWork: plan.work,
+    gdp,
+    budgetBalance: 0,
   };
 
   return {
@@ -344,12 +365,21 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     wage,
     keyRate: scenario.keyRate,
     demandRate: scenario.keyRate,
+    creditRate: scenario.keyRate,
     provinces,
     routes,
     logistics,
     firms,
     market,
-    government: { cash: 0 },
+    government: {
+      cash: 0,
+      debt: 0,
+      taxes: { ...scenario.taxes },
+      transfersPerCapita,
+      revenue: {},
+      spending: {},
+    },
+    bank: { cash: 0, writtenOff: 0 },
     expectations: { adaptive: monthlyTarget, expected: monthlyTarget, trust: scenario.trust },
     pending: emptyQueue(),
     cpiHistory: [100],

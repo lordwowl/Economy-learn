@@ -14,8 +14,9 @@ import type { Recipe } from '../data/schemas';
 import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type CauseEvent } from './causes';
 import { schedule, spreadOverLag, takeDue } from './delay';
 import type { Rng } from './rng';
-import type { Action, Firm, GoodId, Province, RouteMetrics, WorldState } from './state';
+import type { Action, Firm, GoodId, RouteMetrics, WorldState } from './state';
 import { planHouseholdPurchases } from './systems/demand';
+import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget } from './systems/government';
 import { nextExpectations } from './systems/expectations';
 import { laborScale, nextWage, unemploymentRate } from './systems/labor';
 import { legKey, routeCapacity } from './systems/logistics';
@@ -40,23 +41,30 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       for (const part of spreadOverLag(delta, data.balance.lags.keyRateToDemand, turn)) {
         state.pending = schedule(state.pending, part.turn, { type: 'demandRate', delta: part.delta });
       }
+      for (const part of spreadOverLag(delta, data.balance.lags.keyRateToCredit, turn)) {
+        state.pending = schedule(state.pending, part.turn, { type: 'creditRate', delta: part.delta });
+      }
       break;
     }
     case 'addRoadLane': {
-      if (!state.routes.some((r) => r.id === action.route)) throw new Error(`нет дороги "${action.route}"`);
-      const lane = data.buildings.find((b) => b.kind === 'route')!;
+      const route = state.routes.find((r) => r.id === action.route);
+      if (!route) throw new Error(`нет дороги "${action.route}"`);
+      const lane = data.buildings.find((b) => b.kind === 'route');
+      if (lane?.kind !== 'route') throw new Error('в данных нет полосы дороги');
+      // Стройку оплачивает бюджет; деньги уходят строителям — населению.
+      const cost = lane.costPerLength * route.length;
+      addSpending(state, BUDGET.construction, cost);
+      payHouseholds(state, cost, (p) => p.households.laborForce);
       state.pending = schedule(state.pending, turn + lane.buildTurns, { type: 'roadLane', route: action.route });
       break;
     }
+    case 'setTax':
+      state.government.taxes[action.tax] = action.rate;
+      break;
+    case 'setTransfers':
+      state.government.transfersPerCapita = action.perCapita;
+      break;
   }
-}
-
-/** Распределяет сумму между домохозяйствами провинций пропорционально весу. */
-function payHouseholds(state: WorldState, amount: number, weight: (p: Province) => number): void {
-  let total = 0;
-  for (const p of state.provinces) total += weight(p);
-  if (total <= 0 || amount === 0) return;
-  for (const p of state.provinces) p.households.cash += (amount * weight(p)) / total;
 }
 
 /** Средняя по стране цена: провинции взвешены по населению. */
@@ -86,11 +94,14 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   const outputOf = (firm: Firm): GoodId => recipeOf(firm).output.good;
 
   // 1. Решения и отложенные эффекты.
+  state.government.revenue = {};
+  state.government.spending = {};
   for (const action of actions) applyAction(state, action, turn, data);
   const { due, queue } = takeDue(state.pending, turn);
   state.pending = queue;
   for (const effect of due) {
     if (effect.type === 'demandRate') state.demandRate += effect.delta;
+    if (effect.type === 'creditRate') state.creditRate += effect.delta;
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
   }
 
@@ -107,12 +118,13 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const prices = localPrices(firm.province);
     plan.set(firm.id, Math.min(plannedRuns(firm, recipe, balance.firms), affordableRuns(firm, recipe, prices, state.wage)));
   }
+  // Труда на всех не хватает → фабрики и перевозчик (по его загрузке прошлого хода) урезаются в одной пропорции.
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
-  let laborRequired = 0;
-  for (const firm of state.firms) laborRequired += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
-  const scale = laborScale(laborRequired, laborForce);
+  let firmLabor = 0;
+  for (const firm of state.firms) firmLabor += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
+  const scale = laborScale(firmLabor + state.logistics.lastLabor, laborForce);
   for (const [id, runs] of plan) plan.set(id, runs * scale);
-  laborRequired *= scale;
+  const laborRequired = firmLabor * scale;
 
   // 3. Топливо перевозчика и рынок входов.
   const trade = new Trade(state, data, recipeOf, laborForce - laborRequired);
@@ -150,6 +162,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       const paid = result.paid.get(bid.buyer) ?? 0;
       firm.cash -= paid;
       trade.spent.set(firm.id, (trade.spent.get(firm.id) ?? 0) + paid);
+      trade.inputSpent.set(firm.id, (trade.inputSpent.get(firm.id) ?? 0) + paid);
     }
   }
 
@@ -175,7 +188,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   }
   // Труд, зарезервированный под планы, но не использованный, освобождается для перевозок.
   trade.laborLeft = laborForce - productionLabor - trade.logisticsLabor;
-  payHouseholds(state, wageBill, (p) => p.households.laborForce);
+  payWages(state, wageBill);
 
   // 5. Потребительский рынок.
   const consumerBids = new Map<GoodId, TradeBid[]>();
@@ -221,7 +234,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     householdPurchases[good] = purchased;
     shortage[good] = demanded > 0 ? unmet / demanded : 0;
   }
-  payHouseholds(state, trade.logisticsWages, (p) => p.households.laborForce);
+  payWages(state, trade.logisticsWages);
   const employment = productionLabor + trade.logisticsLabor;
 
   // 6a. Заказы: продажи + неудовлетворённый спрос, разнесённый по производителям пропорционально мощности.
@@ -256,17 +269,21 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     m.price = national.price;
   }
 
-  // 6c. Прибыль и дивиденды; госдоходы до M5 сразу возвращаются населению трансфертами.
+  // 6c. Прибыль, налог на прибыль и дивиденды (госфирмы — в бюджет).
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
-    firm.lastProfit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0);
+    const profit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0);
+    const profitTax = Math.max(0, profit) * state.government.taxes.profit;
+    firm.cash -= profitTax;
+    addRevenue(state, BUDGET.profitTax, profitTax);
+    firm.lastProfit = profit - profitTax;
     firm.lossTurns = firm.lastProfit < 0 ? firm.lossTurns + 1 : 0;
     const expectedRuns = mean(firm.ordersHistory) / recipe.output.amount;
     const buffer = balance.firms.cashBufferTurns * expectedRuns * costPerRun(recipe, localPrices(firm.province), state.wage);
     const dividend = Math.max(0, firm.cash - buffer) * balance.firms.dividendPayoutShare;
     if (dividend <= 0) continue;
     firm.cash -= dividend;
-    if (firm.owner === 'state') state.government.cash += dividend;
+    if (firm.owner === 'state') addRevenue(state, BUDGET.stateFirms, dividend);
     else payHouseholds(state, dividend, (p) => p.households.population);
   }
   {
@@ -279,8 +296,16 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       payHouseholds(state, dividend, (p) => p.households.population);
     }
   }
-  payHouseholds(state, state.government.cash, (p) => p.households.population);
-  state.government.cash = 0;
+
+  // 6d. ВВП (добавленная стоимость) и бюджет: проценты, трансферты, займ или погашение долга.
+  let gdp = trade.logisticsRevenue - trade.logisticsFuelCost;
+  for (const firm of state.firms) gdp += (trade.revenue.get(firm.id) ?? 0) - (trade.inputSpent.get(firm.id) ?? 0);
+  settleBudget(state, prev.metrics.gdp, balance.government);
+  const budgetContributions: Breakdown = {};
+  for (const [item, v] of Object.entries(state.government.revenue)) budgetContributions[item] = v;
+  for (const [item, v] of Object.entries(state.government.spending)) budgetContributions[item] = (budgetContributions[item] ?? 0) - v;
+  const budgetEvent = makeCauseEvent(turn, 'budget.balance', budgetContributions);
+  causes.push(budgetEvent);
 
   // 7a. Наценки и цены фирм на следующий ход — по ценам входов в провинции фирмы.
   const expected = state.expectations.expected;
@@ -294,7 +319,14 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       if (m) inputs[input.good] = m.provinces[firm.province] ?? m;
     }
     const unitCost = unitCostBreakdown(recipe, inputs, state.wage);
-    const breakdown = nextPriceBreakdown(firm.breakdown, unitCost, firm.markup, expected, balance.firms);
+    const breakdown = nextPriceBreakdown(
+      firm.breakdown,
+      unitCost,
+      firm.markup,
+      state.government.taxes.sales,
+      expected,
+      balance.firms,
+    );
     causes.push(breakdownChange(turn, `price.firm.${firm.id}`, firm.breakdown, breakdown));
     firm.breakdown = breakdown;
     firm.price = sumBreakdown(breakdown);
@@ -357,6 +389,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     provinceShortage,
     routes,
     logisticsWork: trade.work,
+    gdp,
+    budgetBalance: budgetEvent.delta,
   };
   state.turn = turn;
   return { state, causes };

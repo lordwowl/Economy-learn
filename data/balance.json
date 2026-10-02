@@ -102,5 +102,8 @@
       "first": 1,
       "full": 3
     }
+  },
+  "government": {
+    "debtRatePremium": 0.5
   }
 }

@@ -24,16 +24,17 @@ describe('pricing (GDD 5.4)', () => {
     expect(sumBreakdown(c)).toBeCloseTo(0.5 * 6 + 0.05 * 2 + 0.3 * 10, 12);
   });
 
-  it('новая цена = (1−α)P + α·c(1+m) + γ·π_e·P, и Σ компонент = цене', () => {
+  it('новая цена = (1−α)P + α·c(1+m)/(1−τ) + γ·π_e·P, и Σ компонент = цене', () => {
     const current = { 'input.flour': 3, 'input.fuel': 0.1, wage: 3, markup: 1.2, expectations: 0.2 };
     const P = sumBreakdown(current);
     const cost = unitCostBreakdown(bread, { flour: at(7), fuel: at(2.5) }, 11);
     const c = sumBreakdown(cost);
     const m = 0.25;
     const pi = 0.004;
-    const next = nextPriceBreakdown(current, cost, m, pi, balance.firms);
+    const tax = 0.1;
+    const next = nextPriceBreakdown(current, cost, m, tax, pi, balance.firms);
     const { priceStickiness: a, expectedInflationPassThrough: g } = balance.firms;
-    expect(sumBreakdown(next)).toBeCloseTo((1 - a) * P + a * c * (1 + m) + g * pi * P, 12);
+    expect(sumBreakdown(next)).toBeCloseTo((1 - a) * P + (a * c * (1 + m)) / (1 - tax) + g * pi * P, 12);
   });
 
   it('наценка растёт при низком покрытии и падает при высоком, в пределах [min, max]', () => {

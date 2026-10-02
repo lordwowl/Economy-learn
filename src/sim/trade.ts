@@ -21,6 +21,7 @@ import {
   type GoodBalance,
   type Path,
 } from './systems/logistics';
+import { addRevenue, BUDGET } from './systems/government';
 import { COMPONENT } from './systems/pricing';
 
 export interface TradeBid extends Bid {
@@ -45,6 +46,11 @@ export class Trade {
   readonly soldByFirm = new Map<string, number>();
   readonly revenue = new Map<string, number>();
   readonly spent = new Map<string, number>();
+  /** Покупки входов фирмами (для ВВП). */
+  readonly inputSpent = new Map<string, number>();
+  /** Выручка перевозчика за доставку и его расходы на топливо (для ВВП). */
+  logisticsRevenue = 0;
+  logisticsFuelCost = 0;
   /** tallies[товар][провинция]. */
   readonly tallies: Record<GoodId, Record<string, Tally>> = {};
   readonly unmetByGood: Record<GoodId, number> = {};
@@ -109,6 +115,7 @@ export class Trade {
     for (const firm of sellers) this.sell(firm, good, result.sold.get(firm.id) ?? 0, firm.province, 0);
     logistics.fuel += result.bought.get('logistics') ?? 0;
     logistics.cash -= result.paid.get('logistics') ?? 0;
+    this.logisticsFuelCost += result.paid.get('logistics') ?? 0;
   }
 
   /** Сколько пропускной способности дорог доступно фазе: доля по заявкам прошлого хода, остаток — следующей фазе. */
@@ -206,11 +213,15 @@ export class Trade {
     return firms.map((f) => ({ seller: f.id, price: f.price, quantity: f.inventory[good] ?? 0 }));
   }
 
-  /** Продажа фирмы: склад, деньги, учёт сделки в провинции покупателя (с доставкой, если она была). */
+  /** Продажа фирмы: склад, деньги, налог с продаж, учёт сделки в провинции покупателя (с доставкой, если она была). */
   private sell(firm: Firm, good: GoodId, quantity: number, province: string, delivery: number): void {
     if (quantity <= 0) return;
     firm.inventory[good] = (firm.inventory[good] ?? 0) - quantity;
-    firm.cash += quantity * firm.price;
+    const value = quantity * firm.price;
+    const tax = value * this.state.government.taxes.sales;
+    firm.cash += value - tax;
+    add(this.spent, firm.id, tax);
+    addRevenue(this.state, BUDGET.salesTax, tax);
     add(this.soldByFirm, firm.id, quantity);
     add(this.revenue, firm.id, quantity * firm.price);
     const byProvince = (this.tallies[good] ??= {});
@@ -232,6 +243,7 @@ export class Trade {
     const labor = shipped * laborPerUnit(path, cfg);
     const wages = labor * this.state.wage;
     logistics.cash += shipped * delivery - wages;
+    this.logisticsRevenue += shipped * delivery;
     logistics.fuel = Math.max(0, logistics.fuel - shipped * fuelPerUnit(path, cfg));
     this.logisticsWages += wages;
     this.logisticsLabor += labor;

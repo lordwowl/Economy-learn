@@ -101,7 +101,31 @@ export interface RouteMetrics {
   directions: [DirectionMetrics, DirectionMetrics];
 }
 
-export type PendingEffect = { type: 'demandRate'; delta: number } | { type: 'roadLane'; route: string };
+export type TaxKind = 'sales' | 'profit' | 'income';
+
+export interface Government {
+  /** Деньги на счёте. В конце хода дефицит закрывается займом, профицит гасит долг. */
+  cash: number;
+  debt: number;
+  taxes: Record<TaxKind, number>;
+  transfersPerCapita: number;
+  /** Доходы за прошлый ход по статьям: tax.sales, tax.profit, tax.income, stateFirms. */
+  revenue: Breakdown;
+  /** Расходы за прошлый ход по статьям: transfers, construction, interest. */
+  spending: Breakdown;
+}
+
+/** Банк: выдаёт кредиты (кредит создаёт деньги, погашение — уничтожает), проценты отдаёт владельцам-населению. */
+export interface Bank {
+  cash: number;
+  /** Списанные безнадёжные долги, накопленно: учитываются в инварианте денег. */
+  writtenOff: number;
+}
+
+export type PendingEffect =
+  | { type: 'demandRate'; delta: number }
+  | { type: 'creditRate'; delta: number }
+  | { type: 'roadLane'; route: string };
 
 export interface Metrics {
   cpi: number;
@@ -122,6 +146,10 @@ export interface Metrics {
   routes: Record<string, RouteMetrics>;
   /** Работа перевозчика за ход: груз × длина. */
   logisticsWork: number;
+  /** ВВП за ход: Σ добавленной стоимости фирм и перевозчика. */
+  gdp: number;
+  /** Сальдо бюджета за ход: доходы − расходы. */
+  budgetBalance: number;
 }
 
 export interface WorldState {
@@ -132,12 +160,15 @@ export interface WorldState {
   keyRate: number;
   /** Ставка, на которую уже отреагировали домохозяйства (догоняет keyRate с лагом). */
   demandRate: number;
+  /** Ключевая ставка, уже дошедшая до кредитов (догоняет keyRate с лагом keyRateToCredit). */
+  creditRate: number;
   provinces: Province[];
   routes: Route[];
   logistics: Logistics;
   firms: Firm[];
   market: Record<GoodId, MarketGood>;
-  government: { cash: number };
+  government: Government;
+  bank: Bank;
   expectations: {
     /** π_a, месячная. */
     adaptive: number;
@@ -152,4 +183,8 @@ export interface WorldState {
   metrics: Metrics;
 }
 
-export type Action = { type: 'setKeyRate'; rate: number } | { type: 'addRoadLane'; route: string };
+export type Action =
+  | { type: 'setKeyRate'; rate: number }
+  | { type: 'addRoadLane'; route: string }
+  | { type: 'setTax'; tax: TaxKind; rate: number }
+  | { type: 'setTransfers'; perCapita: number };

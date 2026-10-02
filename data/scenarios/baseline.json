@@ -2,6 +2,12 @@
   "wage": 10,
   "keyRate": 0.06,
   "trust": 0.7,
+  "taxes": {
+    "sales": 0.1,
+    "profit": 0.2,
+    "income": 0.13
+  },
+  "transfersPerCapita": "balanced",
   "provinces": [
     {
       "id": "north",

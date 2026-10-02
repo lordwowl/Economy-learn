@@ -199,6 +199,10 @@ export const balanceSchema = z.strictObject({
   cpiWeights: z
     .record(id, positive)
     .refine((w) => Object.keys(w).length > 0, 'cpiWeights: нужен хотя бы один товар'),
+  government: z.strictObject({
+    /** Премия к ставке госдолга (годовая) за каждую единицу отношения долг / годовой ВВП. */
+    debtRatePremium: nonNegative,
+  }),
   /** Задержки решений, ходов (GDD 5.12). Задержки строек — в buildings.json. */
   lags: z.strictObject({
     keyRateToCredit: lagSchema,
@@ -221,6 +225,14 @@ export const scenarioSchema = z.strictObject({
   keyRate: z.number().finite(),
   /** Доверие к ЦБ C ∈ [0, 1] (GDD 5.9). */
   trust: share,
+  /** Ставки налогов (GDD 5.11): с продаж, на прибыль, на доходы. */
+  taxes: z.strictObject({
+    sales: z.number().min(0).lt(1),
+    profit: share,
+    income: share,
+  }),
+  /** Трансферты населению на душу в месяц; "balanced" — столько, чтобы стартовый бюджет был сбалансирован. */
+  transfersPerCapita: z.union([nonNegative, z.literal('balanced')]),
   provinces: z
     .array(
       z.strictObject({
