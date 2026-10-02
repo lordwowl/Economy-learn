@@ -16,6 +16,7 @@
     "sim": "tsx tools/sim-runner.ts"
   },
   "dependencies": {
+    "pixi.js": "8.22.0",
     "preact": "11.0.0",
     "zod": "4.6.5"
   },

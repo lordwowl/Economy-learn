@@ -338,6 +338,24 @@ export const scenarioSchema = z.strictObject({
     private: z.union([z.number().int().nonnegative(), z.literal('auto')]),
     state: z.number().int().nonnegative(),
   }),
+  /** Раскладка карты (GDD 7): виртуальные координаты, рендер вписывает их в экран. */
+  map: z.strictObject({
+    width: positive,
+    height: positive,
+    provinces: z.record(
+      id,
+      z.strictObject({
+        /** Где стоят здания и подпись. */
+        center: z.tuple([z.number(), z.number()]),
+        /** Узел дорог (транспортный хаб): сюда приходят дороги, чтобы не перекрывать здания. */
+        hub: z.tuple([z.number(), z.number()]),
+        /** Контур провинции; рисуется сглаженным. */
+        polygon: z.array(z.tuple([z.number(), z.number()])).min(3),
+      }),
+    ),
+    /** Изгибы дорог: точки, через которые дорога идёт от a к b (иначе — прямая между узлами). */
+    routes: z.record(id, z.strictObject({ via: z.array(z.tuple([z.number(), z.number()])) })),
+  }),
   /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
   routes: z.array(
     z.strictObject({

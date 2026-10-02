@@ -2,7 +2,6 @@
   "app.title": "Цепочка",
   "app.subtitle": "Экономический симулятор",
   "menu.play": "Играть",
-  "menu.comingSoon": "Скоро здесь появится первый уровень.",
   "app.version": "Версия {version}",
   "good.grain": "Зерно",
   "good.flour": "Мука",
@@ -72,5 +71,19 @@
   "cause.budget.construction": "Стройка",
   "cause.budget.interest": "Проценты по госдолгу",
   "cause.budget.subsidies": "Субсидии",
-  "cause.budget.reserve": "Закупки в госрезерв"
+  "cause.budget.reserve": "Закупки в госрезерв",
+  "map.loading": "Загружаем карту…",
+  "map.unsupported": "Карта не открылась: браузер не поддерживает графику WebGL.",
+  "map.turn": "Месяц {turn}",
+  "map.nextTurn": "Следующий месяц",
+  "map.back": "В меню",
+  "map.cpi": "ИПЦ {value}",
+  "map.unemployment": "Безработица {value}%",
+  "map.legend.title": "Обозначения",
+  "map.legend.deficit": "! / !! / !!! — дефицит в провинции: небольшой / заметный / острый",
+  "map.legend.trend": "▲ цены растут, ▼ цены падают (цвет точек на дорогах — то же)",
+  "map.legend.bottleneck": "! на дороге — узкое место: груз не помещается",
+  "map.legend.shapes": "● ферма  ■ мельница  ⬢ пекарня  ◆ НПЗ  ▲ склад  ▼ элеватор; контур — строится",
+  "map.legend.roads": "Толщина дороги — число полос; пунктир — дорогу можно построить",
+  "map.label": "Карта Республики"
 }
