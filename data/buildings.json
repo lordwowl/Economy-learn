@@ -1,0 +1,80 @@
+{
+  "buildings": [
+    {
+      "id": "farm",
+      "kind": "producer",
+      "nameKey": "building.farm",
+      "shape": "circle",
+      "owner": "private",
+      "recipe": "grain",
+      "capacity": 100,
+      "cost": 400,
+      "buildTurns": 3
+    },
+    {
+      "id": "mill",
+      "kind": "producer",
+      "nameKey": "building.mill",
+      "shape": "square",
+      "owner": "private",
+      "recipe": "flour",
+      "capacity": 100,
+      "cost": 600,
+      "buildTurns": 4
+    },
+    {
+      "id": "bakery",
+      "kind": "producer",
+      "nameKey": "building.bakery",
+      "shape": "hexagon",
+      "owner": "private",
+      "recipe": "bread",
+      "capacity": 80,
+      "cost": 500,
+      "buildTurns": 3
+    },
+    {
+      "id": "refinery",
+      "kind": "producer",
+      "nameKey": "building.refinery",
+      "shape": "diamond",
+      "owner": "state",
+      "recipe": "fuel",
+      "capacity": 60,
+      "cost": 2000,
+      "buildTurns": 6
+    },
+    {
+      "id": "warehouse",
+      "kind": "storage",
+      "nameKey": "building.warehouse",
+      "shape": "triangle",
+      "owner": "state",
+      "storageCapacity": 500,
+      "storedGoods": ["grain", "flour", "bread", "fuel"],
+      "cost": 300,
+      "buildTurns": 2
+    },
+    {
+      "id": "elevator",
+      "kind": "storage",
+      "nameKey": "building.elevator",
+      "shape": "triangle",
+      "owner": "state",
+      "storageCapacity": 1000,
+      "storedGoods": ["grain"],
+      "cost": 350,
+      "buildTurns": 2
+    },
+    {
+      "id": "roadLane",
+      "kind": "route",
+      "nameKey": "building.roadLane",
+      "shape": "line",
+      "owner": "state",
+      "capacityPerLane": 100,
+      "costPerLength": 100,
+      "buildTurns": 3
+    }
+  ]
+}

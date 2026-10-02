@@ -1,0 +1,8 @@
+{
+  "goods": [
+    { "id": "grain", "nameKey": "good.grain" },
+    { "id": "flour", "nameKey": "good.flour" },
+    { "id": "bread", "nameKey": "good.bread" },
+    { "id": "fuel", "nameKey": "good.fuel" }
+  ]
+}
