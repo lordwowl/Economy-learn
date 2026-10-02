@@ -59,7 +59,7 @@ export function XrayView({ state, prev, causes, data, good, province, onSelect }
       </div>
 
       <div class="xray__price">
-        <strong>{t('xray.price', { value: money(x.price, 2) })}</strong>
+        <strong>{t('xray.price', { value: money(x.price) })}</strong>
         {x.prevPrice !== undefined && <span>{t('xray.change', { arrow: arrow(change), change: `${signed(change * 100)}%` })}</span>}
       </div>
 
@@ -77,7 +77,7 @@ export function XrayView({ state, prev, causes, data, good, province, onSelect }
               style={g.group === 'policy' ? undefined : { background: GROUP_COLOR[g.group] }}
             />
             <span>{translate(`xray.group.${g.group}`)}</span>
-            <span>{g.value < 0 ? `▼ ${money(g.value, 2)}` : money(g.value, 2)}</span>
+            <span>{g.value < 0 ? `▼ ${money(g.value)}` : money(g.value)}</span>
             <span class="xray__share">{pct(x.price > 0 ? g.value / x.price : 0, 0)}</span>
           </li>
         ))}
@@ -89,7 +89,7 @@ export function XrayView({ state, prev, causes, data, good, province, onSelect }
         <div key={l.link} class="xray__link">
           <span>{l.link === fuel ? t('xray.fuelLink', { good: goodName(fuel) }) : goodName(l.link)}</span>
           <div class="xray__link-bar" style={{ width: `${(Math.abs(l.value) / maxLink) * 100}%` }} />
-          <span>{money(l.value, 2)}</span>
+          <span>{money(l.value)}</span>
         </div>
       ))}
 

@@ -8,7 +8,7 @@
       "owner": "private",
       "recipe": "grain",
       "capacity": 100,
-      "cost": 400,
+      "cost": 40000,
       "buildTurns": 3
     },
     {
@@ -19,7 +19,7 @@
       "owner": "private",
       "recipe": "flour",
       "capacity": 100,
-      "cost": 600,
+      "cost": 60000,
       "buildTurns": 4
     },
     {
@@ -30,7 +30,7 @@
       "owner": "private",
       "recipe": "bread",
       "capacity": 80,
-      "cost": 500,
+      "cost": 50000,
       "buildTurns": 3
     },
     {
@@ -41,7 +41,7 @@
       "owner": "state",
       "recipe": "fuel",
       "capacity": 200,
-      "cost": 2000,
+      "cost": 200000,
       "buildTurns": 6
     },
     {
@@ -57,7 +57,7 @@
         "bread",
         "fuel"
       ],
-      "cost": 300,
+      "cost": 30000,
       "buildTurns": 2
     },
     {
@@ -70,7 +70,7 @@
       "storedGoods": [
         "grain"
       ],
-      "cost": 350,
+      "cost": 35000,
       "buildTurns": 2
     },
     {
@@ -80,7 +80,7 @@
       "shape": "line",
       "owner": "state",
       "capacityPerLane": 100,
-      "costPerLength": 100,
+      "costPerLength": 10000,
       "buildTurns": 3
     },
     {
@@ -90,7 +90,7 @@
       "shape": "pentagon",
       "owner": "state",
       "workCapacity": 600,
-      "cost": 300,
+      "cost": 30000,
       "buildTurns": 2
     }
   ]

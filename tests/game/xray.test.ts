@@ -5,7 +5,7 @@ import { expandChain, groupOf, xray } from '../../src/game/xray';
 import { run } from '../sim/helpers';
 
 const fuel = getGameData().balance.logistics.fuelGood;
-const r = run(6, (t) => (t === 2 ? [{ type: 'setSubsidy', good: 'flour', perUnit: 0.5 }] : []));
+const r = run(6, (t) => (t === 2 ? [{ type: 'setSubsidy', good: 'flour', perUnit: 50 }] : []));
 const s = r.states[6]!;
 
 describe('рентген товара', () => {

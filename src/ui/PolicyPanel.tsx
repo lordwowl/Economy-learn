@@ -10,8 +10,8 @@ import { goodName, provinceName } from './labels';
 /** Шаги и пределы рычагов (интерфейс, не формулы модели). */
 const RATE = { step: 0.005, min: 0, max: 0.3 };
 const TAX = { step: 0.01, min: 0, max: 0.5 };
-const TRANSFERS = { step: 0.25, min: 0, max: 50 };
-const SUBSIDY = { step: 0.1, min: 0, max: 20 };
+const TRANSFERS = { step: 25, min: 0, max: 5000 };
+const SUBSIDY = { step: 10, min: 0, max: 2000 };
 const CEILING = { share: 0.9, stepShare: 0.02 };
 const RESERVE_QUANTITY = { step: 50, min: 50, max: 1000 };
 const TAXES: TaxKind[] = ['sales', 'profit', 'income'];
@@ -67,7 +67,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
           value={transfers}
           current={g.transfersPerCapita}
           {...TRANSFERS}
-          format={(v) => money(v, 2)}
+          format={(v) => money(v)}
           onChange={(perCapita) => onDecide({ type: 'setTransfers', perCapita })}
         />
       </Section>
@@ -83,7 +83,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
                 value={decided<Extract<Action, { type: 'setSubsidy' }>>(`subsidy.${good}`)?.perUnit ?? announced}
                 current={announced}
                 {...SUBSIDY}
-                format={(v) => money(v, 2)}
+                format={(v) => money(v)}
                 onChange={(perUnit) => onDecide({ type: 'setSubsidy', good, perUnit })}
               />
             );
@@ -104,7 +104,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
                   <span>
                     {goodName(good)}: {t('policy.ceilingOff')}
                   </span>
-                  <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: price * CEILING.share })}>
+                  <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: Math.round(price * CEILING.share) })}>
                     {t('policy.ceilingSet')}
                   </button>
                 </div>
@@ -114,10 +114,10 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
                     label={goodName(good)}
                     value={value}
                     {...(now !== undefined ? { current: now } : {})}
-                    step={Math.max(0.01, Number((price * CEILING.stepShare).toFixed(2)))}
-                    min={0.01}
+                    step={Math.max(1, Math.round(price * CEILING.stepShare))}
+                    min={1}
                     max={price * 3}
-                    format={(v) => money(v, 2)}
+                    format={(v) => money(v)}
                     onChange={(p) => onDecide({ type: 'setPriceCeiling', good, price: p })}
                   />
                   <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: null })}>

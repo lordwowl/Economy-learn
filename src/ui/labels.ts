@@ -37,13 +37,13 @@ export function describeDecision(action: Action, state: WorldState, data: GameDa
     case 'setTax':
       return translate(`decision.setTax.${action.tax}`, { value: pct(action.rate, 0) });
     case 'setTransfers':
-      return t('decision.setTransfers', { value: money(action.perCapita, 2) });
+      return t('decision.setTransfers', { value: money(action.perCapita) });
     case 'setSubsidy':
-      return t('decision.setSubsidy', { good: goodName(action.good), value: money(action.perUnit, 2) });
+      return t('decision.setSubsidy', { good: goodName(action.good), value: money(action.perUnit) });
     case 'setPriceCeiling':
       return action.price === null
         ? t('decision.removePriceCeiling', { good: goodName(action.good) })
-        : t('decision.setPriceCeiling', { good: goodName(action.good), value: money(action.price, 2) });
+        : t('decision.setPriceCeiling', { good: goodName(action.good), value: money(action.price) });
     case 'addRoadLane':
       return t('decision.addRoadLane', { route: routeName(state, action.route) });
     case 'buildStorage':
@@ -89,9 +89,9 @@ export function describeSummary(item: SummaryItem, state: WorldState): string {
     case 'unemployment':
       return t('summary.unemployment', { arrow: arrow(item.change), change: signed(item.change * 100), value: pct(item.value) });
     case 'price':
-      return t('summary.price', { good: goodName(item.target ?? ''), arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value, 2) });
+      return t('summary.price', { good: goodName(item.target ?? ''), arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value) });
     case 'wage':
-      return t('summary.wage', { arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value, 2) });
+      return t('summary.wage', { arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value) });
     case 'budget':
       return t('summary.budget', { change: signedMoney(item.change), value: money(item.value) });
     case 'deficit':

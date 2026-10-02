@@ -5,7 +5,7 @@ import { num } from './format';
 import { LineChart } from './LineChart';
 
 /** Знаков после запятой для показателя. */
-const DIGITS: Record<ChartMetric, number> = { cpi: 1, ppi: 1, unemployment: 1, gdp: 0, keyRate: 1, wage: 2, budgetBalance: 0, debt: 0 };
+const DIGITS: Record<ChartMetric, number> = { cpi: 1, ppi: 1, unemployment: 1, gdp: 0, keyRate: 1, wage: 0, budgetBalance: 0, debt: 0 };
 /** Наименьший размах оси: ±1 пункт индекса, ±1 п.п.; для денег — доля от среднего значения. */
 const MIN_SPAN: Record<ChartMetric, number | { share: number }> = {
   cpi: 2,

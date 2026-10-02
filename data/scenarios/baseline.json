@@ -1,5 +1,5 @@
 {
-  "wage": 10,
+  "wage": 1000,
   "keyRate": 0.06,
   "trust": 0.7,
   "taxes": {

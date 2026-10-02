@@ -69,13 +69,14 @@ describe('рычаги бюджета', () => {
 
 describe('субсидии (GDD 5.11, лаг 5.12)', () => {
   const SUBSIDY_TURN = 2;
-  const r = run(TURNS, (t) => (t === SUBSIDY_TURN ? [{ type: 'setSubsidy', good: 'bread', perUnit: 1 }] : []));
+  const PER_UNIT = 100;
+  const r = run(TURNS, (t) => (t === SUBSIDY_TURN ? [{ type: 'setSubsidy', good: 'bread', perUnit: PER_UNIT }] : []));
   const lag = getGameData().balance.lags.subsidyToPrice;
 
   it('субсидия доходит до производителей с лагом: первая часть через first, вся — через full', () => {
     expect(r.states[SUBSIDY_TURN + lag.first - 1]!.government.subsidies.bread ?? 0).toBe(0);
     expect(r.states[SUBSIDY_TURN + lag.first]!.government.subsidies.bread!).toBeGreaterThan(0);
-    expect(r.states[SUBSIDY_TURN + lag.full]!.government.subsidies.bread!).toBeCloseTo(1, 12);
+    expect(r.states[SUBSIDY_TURN + lag.full]!.government.subsidies.bread!).toBeCloseTo(PER_UNIT, 10);
   });
 
   it('бюджет платит субсидии, хлеб дешевле, в цене есть отрицательная компонента subsidy', () => {
