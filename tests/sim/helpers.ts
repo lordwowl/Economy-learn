@@ -9,7 +9,7 @@ export const SEED = 42;
 export type ScenarioPatch = (scenario: Scenario) => void;
 
 export function baseline(data: GameData = getGameData(), patch?: ScenarioPatch): WorldState {
-  const scenario = structuredClone(scenarioRaw) as Scenario;
+  const scenario = structuredClone(scenarioRaw) as unknown as Scenario;
   patch?.(scenario);
   return createInitialState(data, loadScenario(scenario, data));
 }

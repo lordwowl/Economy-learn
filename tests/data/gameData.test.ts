@@ -138,7 +138,7 @@ describe('сценарии', () => {
   });
 
   it('ловит неизвестное здание, провинцию и рабочую силу больше населения', () => {
-    const bad = structuredClone(scenario) as Scenario;
+    const bad = structuredClone(scenario) as unknown as Scenario;
     bad.firms.push({ building: 'warehouse', province: 'nowhere', count: 1 });
     bad.provinces[0]!.laborForce = bad.provinces[0]!.population + 1;
     const issues = scenarioIssues(bad).join('\n');
@@ -147,15 +147,24 @@ describe('сценарии', () => {
     expect(issues).toMatch(/рабочая сила больше населения/);
   });
 
+  it('ловит провинцию без раскладки на карте и изгиб неизвестной дороги', () => {
+    const bad = structuredClone(scenario) as unknown as Scenario;
+    delete bad.map.provinces.south;
+    bad.map.routes.ghost = { via: [] };
+    const issues = scenarioIssues(bad).join('\n');
+    expect(issues).toMatch(/нет раскладки провинции "south"/);
+    expect(issues).toMatch(/изгиб неизвестной дороги "ghost"/);
+  });
+
   it('ловит запас резерва, который негде хранить', () => {
-    const bad = structuredClone(scenario) as Scenario;
+    const bad = structuredClone(scenario) as unknown as Scenario;
     bad.reserve.storages.push({ building: 'elevator', province: 'north' });
     bad.reserve.stock.push({ province: 'north', good: 'bread', quantity: 10 });
     expect(scenarioIssues(bad).join('\n')).toMatch(/"bread" в провинции "north" негде хранить/);
   });
 
   it('ловит дорогу в неизвестную провинцию, петлю и дубль', () => {
-    const bad = structuredClone(scenario) as Scenario;
+    const bad = structuredClone(scenario) as unknown as Scenario;
     bad.routes.push({ id: 'toNowhere', a: 'north', b: 'nowhere', length: 1, lanes: 1 });
     bad.routes.push({ id: 'loop', a: 'south', b: 'south', length: 1, lanes: 1 });
     bad.routes.push({ id: 'twin', a: 'center', b: 'north', length: 2, lanes: 1 });

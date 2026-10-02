@@ -78,3 +78,87 @@ body {
 .menu__footer {
   font-size: 0.875rem;
 }
+
+/* ---------- экран карты (M7, временный) ---------- */
+
+.map-screen {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 15%, transparent);
+}
+
+.map-bar__stat {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9375rem;
+}
+
+.map-bar__back,
+.map-bar__next {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.map-bar__back {
+  border: 1px solid color-mix(in srgb, var(--fg) 30%, transparent);
+  background: transparent;
+  color: var(--fg);
+}
+
+.map-bar__next {
+  margin-left: auto;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.map-bar__back:focus-visible,
+.map-bar__next:focus-visible {
+  outline: 3px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.map-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.map-canvas canvas {
+  display: block;
+}
+
+.map-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.map-legend {
+  padding: 6px 12px 10px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.map-legend ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

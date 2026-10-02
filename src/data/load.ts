@@ -166,6 +166,13 @@ export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): S
     if (!fits) issues.push(`${file}: резерв: "${item.good}" в провинции "${item.province}" негде хранить`);
   }
 
+  for (const p of scenario.provinces) {
+    if (!scenario.map.provinces[p.id]) issues.push(`${file}: карта: нет раскладки провинции "${p.id}"`);
+  }
+  for (const route of Object.keys(scenario.map.routes)) {
+    if (!scenario.routes.some((r) => r.id === route)) issues.push(`${file}: карта: изгиб неизвестной дороги "${route}"`);
+  }
+
   checkUniqueIds(file, scenario.routes, issues);
   const pairs = new Set<string>();
   for (const route of scenario.routes) {
