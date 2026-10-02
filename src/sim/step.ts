@@ -18,7 +18,7 @@ import type { Action, Firm, GoodId, Province, RouteMetrics, WorldState } from '.
 import { planHouseholdPurchases } from './systems/demand';
 import { nextExpectations } from './systems/expectations';
 import { laborScale, nextWage, unemploymentRate } from './systems/labor';
-import { routeCapacity } from './systems/logistics';
+import { legKey, routeCapacity } from './systems/logistics';
 import { nextMarkup, nextPriceBreakdown, unitCostBreakdown } from './systems/pricing';
 import { affordableRuns, costPerRun, coverage, feasibleRuns, plannedRuns } from './systems/production';
 import { Trade, type TradeBid } from './trade';
@@ -329,10 +329,15 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   const lane = data.buildings.find((b) => b.kind === 'route');
   const routes: Record<string, RouteMetrics> = {};
   for (const route of state.routes) {
+    const direction = (from: string, to: string) => ({
+      from,
+      to,
+      flow: trade.legFlow[legKey(route.id, to)] ?? 0,
+      blocked: trade.legBlocked[legKey(route.id, to)] ?? 0,
+    });
     routes[route.id] = {
-      flow: trade.routeFlow[route.id] ?? 0,
       capacity: lane?.kind === 'route' ? routeCapacity(route, lane.capacityPerLane) : 0,
-      blocked: trade.routeBlocked[route.id] ?? 0,
+      directions: [direction(route.a, route.b), direction(route.b, route.a)],
     };
   }
 

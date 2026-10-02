@@ -2,7 +2,7 @@
 // Сначала покупатели берут местное (рынок провинции), затем нехватку довозят из других провинций
 // по кратчайшему пути. Цена доставленного = средняя цена продавцов провинции-источника + тариф.
 // Перевозчик тратит своё топливо и нанимает труд; не влезшее в дороги остаётся у продавцов («очередь»).
-// Пропускная способность дорог делится между рынком входов и потребительским рынком пропорционально
+// Пропускная способность участков (дорога в одну сторону) делится между рынком входов и потребительским рынком пропорционально
 // заявкам прошлого хода; внутри рынка все товары планируются вместе и при пробке урезаются одинаково.
 
 import type { GameData } from '../data/load';
@@ -13,6 +13,7 @@ import type { Firm, GoodId, TradePhase, WorldState } from './state';
 import {
   fuelPerUnit,
   laborPerUnit,
+  legKey,
   planShipments,
   routeCapacity,
   shortestPaths,
@@ -47,8 +48,9 @@ export class Trade {
   /** tallies[товар][провинция]. */
   readonly tallies: Record<GoodId, Record<string, Tally>> = {};
   readonly unmetByGood: Record<GoodId, number> = {};
-  readonly routeFlow: Record<string, number> = {};
-  readonly routeBlocked: Record<string, number> = {};
+  /** Поток и очередь по участкам (legKey). */
+  readonly legFlow: Record<string, number> = {};
+  readonly legBlocked: Record<string, number> = {};
   readonly requested: Record<TradePhase, Record<string, number>> = { inputs: {}, consumer: {} };
   /** Заявленная работа (до ограничений дорог и ресурсов): по ней перевозчик планирует топливо. */
   requestedWork = 0;
@@ -77,10 +79,13 @@ export class Trade {
     );
     const lane = data.buildings.find((b) => b.kind === 'route');
     for (const route of state.routes) {
-      this.capacity[route.id] = lane?.kind === 'route' ? routeCapacity(route, lane.capacityPerLane) : 0;
-      this.capacityLeft[route.id] = this.capacity[route.id]!;
-      this.routeFlow[route.id] = 0;
-      this.routeBlocked[route.id] = 0;
+      for (const to of [route.a, route.b]) {
+        const leg = legKey(route.id, to);
+        this.capacity[leg] = lane?.kind === 'route' ? routeCapacity(route, lane.capacityPerLane) : 0;
+        this.capacityLeft[leg] = this.capacity[leg]!;
+        this.legFlow[leg] = 0;
+        this.legBlocked[leg] = 0;
+      }
     }
     for (const firm of state.firms) {
       const good = recipeOf(firm).output.good;
@@ -111,10 +116,10 @@ export class Trade {
     if (phase === 'consumer') return { ...this.capacityLeft };
     const last = this.state.logistics.requested;
     const result: Record<string, number> = {};
-    for (const [route, left] of Object.entries(this.capacityLeft)) {
-      const mine = last.inputs[route] ?? 0;
-      const total = mine + (last.consumer[route] ?? 0);
-      result[route] = total > 0 ? Math.min(left, ((this.capacity[route] ?? 0) * mine) / total) : left;
+    for (const [leg, left] of Object.entries(this.capacityLeft)) {
+      const mine = last.inputs[leg] ?? 0;
+      const total = mine + (last.consumer[leg] ?? 0);
+      result[leg] = total > 0 ? Math.min(left, ((this.capacity[leg] ?? 0) * mine) / total) : left;
     }
     return result;
   }
@@ -168,7 +173,7 @@ export class Trade {
     for (const s of shipments) {
       this.requestedWork += s.requested * s.path.length;
       for (const e of s.path.edges) this.requested[phase][e] = (this.requested[phase][e] ?? 0) + s.requested;
-      for (const e of s.bottlenecks) this.routeBlocked[e] = (this.routeBlocked[e] ?? 0) + s.blockedByRoad;
+      for (const e of s.bottlenecks) this.legBlocked[e] = (this.legBlocked[e] ?? 0) + s.blockedByRoad;
     }
 
     for (const [good, rest] of remaining) {
@@ -234,7 +239,7 @@ export class Trade {
     this.work += shipped * path.length;
     for (const e of path.edges) {
       this.capacityLeft[e] = (this.capacityLeft[e] ?? 0) - shipped;
-      this.routeFlow[e] = (this.routeFlow[e] ?? 0) + shipped;
+      this.legFlow[e] = (this.legFlow[e] ?? 0) + shipped;
     }
   }
 }

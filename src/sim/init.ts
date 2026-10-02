@@ -11,6 +11,7 @@ import type { Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, Rou
 import { spendingShare } from './systems/demand';
 import {
   laborPerUnit,
+  legKey,
   planShipments,
   routeCapacity,
   shortestPaths,
@@ -134,7 +135,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     }
 
     const capacityLeft: Record<string, number> = {};
-    for (const r of routes) capacityLeft[r.id] = routeCapacity(r, capacityPerLane);
+    for (const r of routes) for (const to of [r.a, r.b]) capacityLeft[legKey(r.id, to)] = routeCapacity(r, capacityPerLane);
     const balances: GoodBalance[] = [];
     /** Доля домохозяйств в спросе провинции на товар — чтобы разделить заявки на перевозку по фазам. */
     const householdShare: Record<GoodId, Record<string, number>> = {};
@@ -307,9 +308,13 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   });
 
   const routeMetrics: Record<string, RouteMetrics> = {};
-  for (const r of routes) routeMetrics[r.id] = { flow: 0, capacity: routeCapacity(r, capacityPerLane), blocked: 0 };
+  const legFlow: Record<string, number> = {};
   for (const list of Object.values(plan.shipments)) {
-    for (const sh of list) for (const e of sh.path.edges) routeMetrics[e]!.flow += sh.quantity;
+    for (const sh of list) for (const e of sh.path.edges) legFlow[e] = (legFlow[e] ?? 0) + sh.quantity;
+  }
+  for (const r of routes) {
+    const direction = (from: string, to: string) => ({ from, to, flow: legFlow[legKey(r.id, to)] ?? 0, blocked: 0 });
+    routeMetrics[r.id] = { capacity: routeCapacity(r, capacityPerLane), directions: [direction(r.a, r.b), direction(r.b, r.a)] };
   }
 
   const monthlyTarget = annualToMonthly(balance.expectations.inflationTarget);

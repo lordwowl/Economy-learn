@@ -79,18 +79,26 @@ export interface Logistics {
   workHistory: number[];
   lastWork: number;
   lastLabor: number;
-  /** Заявки на перевозку за прошлый ход по дорогам, отдельно для рынка входов и потребительского. */
+  /** Заявки на перевозку за прошлый ход по участкам (дорога + направление), отдельно для рынка входов и потребительского. */
   requested: Record<TradePhase, Record<string, number>>;
 }
 
 export type TradePhase = 'inputs' | 'consumer';
 
-export interface RouteMetrics {
-  /** Провезено за ход (в обе стороны). */
+export interface DirectionMetrics {
+  from: string;
+  to: string;
+  /** Провезено за ход в этом направлении. */
   flow: number;
-  capacity: number;
-  /** Не провезено из-за этой дороги — «очередь» узкого места. */
+  /** Не провезено из-за этой дороги в этом направлении — «очередь» узкого места. */
   blocked: number;
+}
+
+export interface RouteMetrics {
+  /** Пропускная способность в каждую сторону. */
+  capacity: number;
+  /** [a → b, b → a]. */
+  directions: [DirectionMetrics, DirectionMetrics];
 }
 
 export type PendingEffect = { type: 'demandRate'; delta: number } | { type: 'roadLane'; route: string };
