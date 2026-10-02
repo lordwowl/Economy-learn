@@ -2,7 +2,7 @@ import type { GameData } from '../data';
 import { t, translate } from '../i18n';
 import type { Action, WorldState } from '../sim';
 import { Section } from './controls';
-import { num } from './format';
+import { money, num } from './format';
 import { provinceName, routeName } from './labels';
 
 interface Props {
@@ -29,7 +29,7 @@ export function BuildPanel({ state, data, onDecide }: Props) {
               </div>
               <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'addRoadLane', route: route.id })}>
                 {t('build.addLane')}
-                <small>{t('build.cost', { cost: num(lane.costPerLength * route.length), turns: lane.buildTurns })}</small>
+                <small>{t('build.cost', { cost: money(lane.costPerLength * route.length), turns: lane.buildTurns })}</small>
               </button>
             </div>
           ))}
@@ -48,7 +48,7 @@ export function BuildPanel({ state, data, onDecide }: Props) {
                   </div>
                   <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStorage', building: b.id, province: p.id })}>
                     +1
-                    <small>{t('build.cost', { cost: num(b.cost), turns: b.buildTurns })}</small>
+                    <small>{t('build.cost', { cost: money(b.cost), turns: b.buildTurns })}</small>
                   </button>
                 </div>
               )),
@@ -63,7 +63,7 @@ export function BuildPanel({ state, data, onDecide }: Props) {
             </div>
             <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStateFleet' })}>
               {t('build.addFleet')}
-              <small>{t('build.cost', { cost: num(fleet.cost), turns: fleet.buildTurns })}</small>
+              <small>{t('build.cost', { cost: money(fleet.cost), turns: fleet.buildTurns })}</small>
             </button>
           </div>
         </Section>

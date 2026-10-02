@@ -1,5 +1,7 @@
 // Форматирование чисел для интерфейса (русская запись: запятая, неразрывные пробелы).
 
+import { t } from '../i18n';
+
 const nf = (digits: number) =>
   new Intl.NumberFormat('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const cache = new Map<number, Intl.NumberFormat>();
@@ -27,4 +29,14 @@ export function signed(value: number, digits = 1): string {
 /** Стрелка направления, дублирующая цвет. */
 export function arrow(value: number): string {
   return value > 0 ? '▲' : value < 0 ? '▼' : '•';
+}
+
+/** Деньги во вымышленной валюте (ru.json: currency.amount): «1 200 кол.». */
+export function money(value: number, digits = 0): string {
+  return t('currency.amount', { value: num(value, digits) });
+}
+
+/** Деньги со знаком: «+120 кол.» / «−31 кол.». */
+export function signedMoney(value: number, digits = 0): string {
+  return t('currency.amount', { value: signed(value, digits) });
 }

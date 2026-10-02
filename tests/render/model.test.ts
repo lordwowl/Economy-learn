@@ -42,7 +42,7 @@ describe('тепловая карта дефицита', () => {
 
 describe('тренд цен', () => {
   it('без прошлого хода — flat; при росте цен — up со знаком ▲', () => {
-    const r = run(8, (t) => (t === 2 ? [{ type: 'setTransfers', perCapita: 10 }] : []));
+    const r = run(8, (t) => (t === 2 ? [{ type: 'setTransfers', perCapita: 1000 }] : []));
     expect(priceTrend(r.states[1]!, undefined, 'north')).toBe('flat');
     expect(priceTrend(r.states[7]!, r.states[6]!, 'north')).toBe('up');
     expect(trendMark('up')).toBe('▲');

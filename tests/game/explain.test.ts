@@ -31,15 +31,15 @@ const actions: Record<number, Action[]> = {
     { type: 'buildStorage', building: 'warehouse', province: 'north' },
     { type: 'buildStateFleet' },
     { type: 'addRoadLane', route: 'northCenter' },
-    { type: 'setSubsidy', good: 'flour', perUnit: 0.3 },
+    { type: 'setSubsidy', good: 'flour', perUnit: 30 },
     { type: 'setTax', tax: 'sales', rate: 0.12 },
   ],
   2: [{ type: 'shock', shock: 'harvestFailure' }],
-  3: [{ type: 'setPriceCeiling', good: 'bread', price: 6 }],
+  3: [{ type: 'setPriceCeiling', good: 'bread', price: 600 }],
   4: [{ type: 'reserveBuy', good: 'fuel', province: 'north', quantity: 100 }],
   5: [{ type: 'shock', shock: 'refineryAccident' }, { type: 'setKeyRate', rate: 0.1 }],
   6: [{ type: 'reserveRelease', good: 'fuel', province: 'north', quantity: 100 }],
-  8: [{ type: 'setTransfers', perCapita: 2 }],
+  8: [{ type: 'setTransfers', perCapita: 200 }],
 };
 const everything = run(14, (t) => actions[t] ?? []);
 const events = everything.causes.flat();

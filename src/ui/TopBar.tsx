@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import type { WorldState } from '../sim';
-import { arrow, num, pct, signed } from './format';
+import { arrow, money, num, pct, signed, signedMoney } from './format';
 
 export type TopMetric = 'cpi' | 'unemployment' | 'budget.balance' | 'trust';
 
@@ -18,7 +18,7 @@ export function TopBar({ state, prev, onWhy }: Props) {
   const tiles: { metric: TopMetric; title: string; value: string; note: string }[] = [
     { metric: 'cpi', title: t('top.cpi'), value: num(m.cpi, 1), note: `${arrow(cpiChange)} ${signed(cpiChange * 100)}%` },
     { metric: 'unemployment', title: t('top.unemployment'), value: pct(m.unemployment), note: `${arrow(uChange)} ${signed(uChange * 100)}` },
-    { metric: 'budget.balance', title: t('top.budget'), value: signed(m.budgetBalance, 0), note: t('top.debt', { value: num(state.government.debt) }) },
+    { metric: 'budget.balance', title: t('top.budget'), value: signedMoney(m.budgetBalance), note: t('top.debt', { value: money(state.government.debt) }) },
     { metric: 'trust', title: t('top.trust'), value: pct(state.expectations.trust, 0), note: '' },
   ];
   return (
