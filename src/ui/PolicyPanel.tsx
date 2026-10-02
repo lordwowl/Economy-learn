@@ -4,7 +4,7 @@ import { decisionKey } from '../game/session';
 import { t, translate } from '../i18n';
 import type { Action, TaxKind, WorldState } from '../sim';
 import { Section, Stepper } from './controls';
-import { num, pct } from './format';
+import { money, num, pct } from './format';
 import { goodName, provinceName } from './labels';
 
 /** Шаги и пределы рычагов (интерфейс, не формулы модели). */
@@ -67,7 +67,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
           value={transfers}
           current={g.transfersPerCapita}
           {...TRANSFERS}
-          format={(v) => num(v, 2)}
+          format={(v) => money(v, 2)}
           onChange={(perCapita) => onDecide({ type: 'setTransfers', perCapita })}
         />
       </Section>
@@ -83,7 +83,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
                 value={decided<Extract<Action, { type: 'setSubsidy' }>>(`subsidy.${good}`)?.perUnit ?? announced}
                 current={announced}
                 {...SUBSIDY}
-                format={(v) => num(v, 2)}
+                format={(v) => money(v, 2)}
                 onChange={(perUnit) => onDecide({ type: 'setSubsidy', good, perUnit })}
               />
             );
@@ -117,7 +117,7 @@ export function PolicyPanel({ state, data, decisions, onDecide }: Props) {
                     step={Math.max(0.01, Number((price * CEILING.stepShare).toFixed(2)))}
                     min={0.01}
                     max={price * 3}
-                    format={(v) => num(v, 2)}
+                    format={(v) => money(v, 2)}
                     onChange={(p) => onDecide({ type: 'setPriceCeiling', good, price: p })}
                   />
                   <button type="button" class="chip" onClick={() => onDecide({ type: 'setPriceCeiling', good, price: null })}>

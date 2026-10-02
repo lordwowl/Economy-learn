@@ -7,7 +7,7 @@ import type { PendingItem } from '../game/pending';
 import type { SummaryItem } from '../game/summary';
 import { t, translate } from '../i18n';
 import type { Action, WorldState } from '../sim';
-import { arrow, num, pct, signed } from './format';
+import { arrow, money, num, pct, signed, signedMoney } from './format';
 
 export const goodName = (good: string) => translate(`good.${good}`);
 
@@ -37,13 +37,13 @@ export function describeDecision(action: Action, state: WorldState, data: GameDa
     case 'setTax':
       return translate(`decision.setTax.${action.tax}`, { value: pct(action.rate, 0) });
     case 'setTransfers':
-      return t('decision.setTransfers', { value: num(action.perCapita, 2) });
+      return t('decision.setTransfers', { value: money(action.perCapita, 2) });
     case 'setSubsidy':
-      return t('decision.setSubsidy', { good: goodName(action.good), value: num(action.perUnit, 2) });
+      return t('decision.setSubsidy', { good: goodName(action.good), value: money(action.perUnit, 2) });
     case 'setPriceCeiling':
       return action.price === null
         ? t('decision.removePriceCeiling', { good: goodName(action.good) })
-        : t('decision.setPriceCeiling', { good: goodName(action.good), value: num(action.price, 2) });
+        : t('decision.setPriceCeiling', { good: goodName(action.good), value: money(action.price, 2) });
     case 'addRoadLane':
       return t('decision.addRoadLane', { route: routeName(state, action.route) });
     case 'buildStorage':
@@ -70,7 +70,7 @@ export function describePending(item: PendingItem, state: WorldState): string {
     case 'creditRate':
       return t(item.kind === 'demandRate' ? 'pending.demandRate' : 'pending.creditRate', { amount: signed(item.amount * 100), turns });
     case 'subsidy':
-      return t('pending.subsidy', { good: goodName(target), amount: signed(item.amount, 2), turns });
+      return t('pending.subsidy', { good: goodName(target), amount: signedMoney(item.amount, 2), turns });
     case 'roadLane':
       return t('pending.roadLane', { route: routeName(state, target), turns });
     case 'firm':
@@ -89,11 +89,11 @@ export function describeSummary(item: SummaryItem, state: WorldState): string {
     case 'unemployment':
       return t('summary.unemployment', { arrow: arrow(item.change), change: signed(item.change * 100), value: pct(item.value) });
     case 'price':
-      return t('summary.price', { good: goodName(item.target ?? ''), arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: num(item.value, 2) });
+      return t('summary.price', { good: goodName(item.target ?? ''), arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value, 2) });
     case 'wage':
-      return t('summary.wage', { arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: num(item.value, 2) });
+      return t('summary.wage', { arrow: arrow(item.change), change: signed(item.change * 100) + '%', value: money(item.value, 2) });
     case 'budget':
-      return t('summary.budget', { change: signed(item.change, 0), value: num(item.value) });
+      return t('summary.budget', { change: signedMoney(item.change), value: money(item.value) });
     case 'deficit':
       return t('summary.deficit', { province: provinceName(state, item.target ?? ''), marks: deficitMark(deficitLevel(item.value)), value: pct(item.value, 0) });
     case 'firmsOpened':
