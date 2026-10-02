@@ -1,0 +1,34 @@
+{
+  "recipes": [
+    {
+      "id": "grain",
+      "output": { "good": "grain", "amount": 1 },
+      "inputs": [{ "good": "fuel", "amount": 0.1 }],
+      "labor": 0.2
+    },
+    {
+      "id": "flour",
+      "output": { "good": "flour", "amount": 0.8 },
+      "inputs": [
+        { "good": "grain", "amount": 1 },
+        { "good": "fuel", "amount": 0.05 }
+      ],
+      "labor": 0.1
+    },
+    {
+      "id": "bread",
+      "output": { "good": "bread", "amount": 1 },
+      "inputs": [
+        { "good": "flour", "amount": 0.5 },
+        { "good": "fuel", "amount": 0.05 }
+      ],
+      "labor": 0.3
+    },
+    {
+      "id": "fuel",
+      "output": { "good": "fuel", "amount": 1 },
+      "inputs": [],
+      "labor": 0.2
+    }
+  ]
+}

@@ -3,5 +3,16 @@
   "app.subtitle": "Экономический симулятор",
   "menu.play": "Играть",
   "menu.comingSoon": "Скоро здесь появится первый уровень.",
-  "app.version": "Версия {version}"
+  "app.version": "Версия {version}",
+  "good.grain": "Зерно",
+  "good.flour": "Мука",
+  "good.bread": "Хлеб",
+  "good.fuel": "Топливо",
+  "building.farm": "Ферма",
+  "building.mill": "Мельница",
+  "building.bakery": "Пекарня",
+  "building.refinery": "НПЗ",
+  "building.warehouse": "Склад",
+  "building.elevator": "Элеватор",
+  "building.roadLane": "Полоса дороги"
 }

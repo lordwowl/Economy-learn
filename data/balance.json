@@ -1,0 +1,82 @@
+{
+  "firms": {
+    "targetCoverage": 1.0,
+    "salesAverageTurns": 3,
+    "initialMarkup": 0.2,
+    "markupMin": 0.05,
+    "markupMax": 0.6,
+    "markupAdjustSpeed": 0.1,
+    "priceStickiness": 0.4,
+    "expectedInflationPassThrough": 0.5,
+    "closeAfterLossTurns": 6
+  },
+  "demand": {
+    "baseSpendingShare": 0.8,
+    "rateSensitivity": 1.0,
+    "neutralRate": 0.06,
+    "goods": {
+      "bread": {
+        "basePerCapita": 1.0,
+        "referencePrice": 10,
+        "priceElasticity": -0.2,
+        "incomeElasticity": 0.3,
+        "minShareOfBase": 0.6
+      },
+      "flour": {
+        "basePerCapita": 0.2,
+        "referencePrice": 6,
+        "priceElasticity": -0.3,
+        "incomeElasticity": 0.2,
+        "minShareOfBase": 0
+      },
+      "fuel": {
+        "basePerCapita": 0.5,
+        "referencePrice": 8,
+        "priceElasticity": -0.3,
+        "incomeElasticity": 0.5,
+        "minShareOfBase": 0
+      }
+    }
+  },
+  "labor": {
+    "naturalUnemployment": 0.05,
+    "wageAdjustSpeed": 0.5
+  },
+  "credit": {
+    "loanSpread": 0.03,
+    "expansionRoiMargin": 0.02,
+    "entryShortageTurns": 3,
+    "entryMinMarkup": 0.15
+  },
+  "expectations": {
+    "inflationTarget": 0.04,
+    "adaptiveWeight": 0.7
+  },
+  "fx": {
+    "tradeBalanceSensitivity": 0.1,
+    "rateDifferentialSensitivity": 0.05,
+    "importPassThroughTurns": 1
+  },
+  "priceCeiling": {
+    "blackMarketShareOfUnmet": 0.5,
+    "blackMarketPremiumPerShortage": 1.0
+  },
+  "logistics": {
+    "fuelPerUnitLength": 0.02,
+    "laborPerUnit": 0.01
+  },
+  "cpiWeights": {
+    "bread": 0.35,
+    "flour": 0.1,
+    "fuel": 0.25
+  },
+  "lags": {
+    "keyRateToCredit": { "first": 1, "full": 2 },
+    "keyRateToDemand": { "first": 2, "full": 4 },
+    "keyRateToPrices": { "first": 3, "full": 6 },
+    "subsidyToPrice": { "first": 1, "full": 2 },
+    "tariffToImportPrice": { "first": 1, "full": 1 },
+    "tariffToSubstitution": { "first": 6, "full": 12 },
+    "priceCeilingToShortage": { "first": 1, "full": 3 }
+  }
+}
