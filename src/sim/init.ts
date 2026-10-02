@@ -380,6 +380,8 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       debt: 0,
       taxes: { ...scenario.taxes },
       transfersPerCapita,
+      subsidies: {},
+      announcedSubsidies: {},
       revenue: {},
       spending: {},
     },

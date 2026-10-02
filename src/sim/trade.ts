@@ -21,7 +21,7 @@ import {
   type GoodBalance,
   type Path,
 } from './systems/logistics';
-import { addRevenue, BUDGET } from './systems/government';
+import { addRevenue, addSpending, BUDGET } from './systems/government';
 import { COMPONENT } from './systems/pricing';
 
 export interface TradeBid extends Bid {
@@ -46,6 +46,8 @@ export class Trade {
   readonly soldByFirm = new Map<string, number>();
   readonly revenue = new Map<string, number>();
   readonly spent = new Map<string, number>();
+  /** Субсидии, полученные фирмами (входят в прибыль, но не в ВВП). */
+  readonly subsidyReceived = new Map<string, number>();
   /** Покупки входов фирмами (для ВВП). */
   readonly inputSpent = new Map<string, number>();
   /** Выручка перевозчика за доставку и его расходы на топливо (для ВВП). */
@@ -222,6 +224,12 @@ export class Trade {
     firm.cash += value - tax;
     add(this.spent, firm.id, tax);
     addRevenue(this.state, BUDGET.salesTax, tax);
+    const subsidy = quantity * (this.state.government.subsidies[good] ?? 0);
+    if (subsidy > 0) {
+      firm.cash += subsidy;
+      add(this.subsidyReceived, firm.id, subsidy);
+      addSpending(this.state, BUDGET.subsidies, subsidy);
+    }
     add(this.soldByFirm, firm.id, quantity);
     add(this.revenue, firm.id, quantity * firm.price);
     const byProvince = (this.tallies[good] ??= {});

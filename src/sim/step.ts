@@ -65,6 +65,15 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
     case 'setTransfers':
       state.government.transfersPerCapita = action.perCapita;
       break;
+    case 'setSubsidy': {
+      const g = state.government;
+      const delta = action.perUnit - (g.announcedSubsidies[action.good] ?? 0);
+      g.announcedSubsidies[action.good] = action.perUnit;
+      for (const part of spreadOverLag(delta, data.balance.lags.subsidyToPrice, turn)) {
+        state.pending = schedule(state.pending, part.turn, { type: 'subsidy', good: action.good, delta: part.delta });
+      }
+      break;
+    }
   }
 }
 
@@ -103,6 +112,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const effect of due) {
     if (effect.type === 'demandRate') state.demandRate += effect.delta;
     if (effect.type === 'creditRate') state.creditRate += effect.delta;
+    if (effect.type === 'subsidy') {
+      const subsidies = state.government.subsidies;
+      subsidies[effect.good] = (subsidies[effect.good] ?? 0) + effect.delta;
+    }
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
     if (effect.type === 'firmReady') {
       const firm = state.firms.find((f) => f.id === effect.firm);
@@ -285,7 +298,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
     const interest = chargeInterest(firm, state, balance.credit);
-    const profit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0) - interest;
+    const profit =
+      (trade.revenue.get(firm.id) ?? 0) + (trade.subsidyReceived.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0) - interest;
     const profitTax = Math.max(0, profit) * state.government.taxes.profit;
     firm.cash -= profitTax;
     addRevenue(state, BUDGET.profitTax, profitTax);
@@ -401,6 +415,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       unitCost,
       firm.markup,
       state.government.taxes.sales,
+      state.government.subsidies[recipe.output.good] ?? 0,
       expected,
       balance.firms,
     );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getGameData } from '../../src/data';
-import { run } from './helpers';
+import { run, totalMoney } from './helpers';
 
 const TURNS = 18;
 const passive = run(TURNS);
@@ -64,5 +64,32 @@ describe('рычаги бюджета', () => {
     const r = run(2, (t) => (t === 1 ? [{ type: 'addRoadLane', route: 'northCenter' }] : []));
     const length = r.states[0]!.routes.find((x) => x.id === 'northCenter')!.length;
     expect(r.states[1]!.government.spending.construction).toBeCloseTo(lane.costPerLength * length, 9);
+  });
+});
+
+describe('субсидии (GDD 5.11, лаг 5.12)', () => {
+  const SUBSIDY_TURN = 2;
+  const r = run(TURNS, (t) => (t === SUBSIDY_TURN ? [{ type: 'setSubsidy', good: 'bread', perUnit: 1 }] : []));
+  const lag = getGameData().balance.lags.subsidyToPrice;
+
+  it('субсидия доходит до производителей с лагом: первая часть через first, вся — через full', () => {
+    expect(r.states[SUBSIDY_TURN + lag.first - 1]!.government.subsidies.bread ?? 0).toBe(0);
+    expect(r.states[SUBSIDY_TURN + lag.first]!.government.subsidies.bread!).toBeGreaterThan(0);
+    expect(r.states[SUBSIDY_TURN + lag.full]!.government.subsidies.bread!).toBeCloseTo(1, 12);
+  });
+
+  it('бюджет платит субсидии, хлеб дешевле, в цене есть отрицательная компонента subsidy', () => {
+    const t = SUBSIDY_TURN + lag.full + 3;
+    expect(r.states[t]!.government.spending.subsidies!).toBeGreaterThan(0);
+    expect(r.states[t]!.market.bread!.price).toBeLessThan(passive.states[t]!.market.bread!.price);
+    expect(r.states[t]!.market.bread!.breakdown.subsidy!).toBeLessThan(0);
+  });
+
+  it('Σ компонент = цена и деньги − долги сохраняются', () => {
+    const start = totalMoney(r.states[0]!);
+    for (const s of r.states) {
+      expect(totalMoney(s)).toBeCloseTo(start, 6);
+      for (const f of s.firms) expect(Object.values(f.breakdown).reduce((a, b) => a + b, 0)).toBeCloseTo(f.price, 9);
+    }
   });
 });

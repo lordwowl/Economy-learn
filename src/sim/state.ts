@@ -115,9 +115,13 @@ export interface Government {
   debt: number;
   taxes: Record<TaxKind, number>;
   transfersPerCapita: number;
+  /** Действующая субсидия производителю за единицу проданного товара (догоняет объявленную с лагом). */
+  subsidies: Record<GoodId, number>;
+  /** Объявленная игроком субсидия. */
+  announcedSubsidies: Record<GoodId, number>;
   /** Доходы за прошлый ход по статьям: tax.sales, tax.profit, tax.income, stateFirms. */
   revenue: Breakdown;
-  /** Расходы за прошлый ход по статьям: transfers, construction, interest. */
+  /** Расходы за прошлый ход по статьям: transfers, construction, interest, subsidies. */
   spending: Breakdown;
 }
 
@@ -131,6 +135,7 @@ export interface Bank {
 export type PendingEffect =
   | { type: 'demandRate'; delta: number }
   | { type: 'creditRate'; delta: number }
+  | { type: 'subsidy'; good: GoodId; delta: number }
   | { type: 'roadLane'; route: string }
   | { type: 'firmReady'; firm: string; capacity: number };
 
@@ -198,4 +203,5 @@ export type Action =
   | { type: 'setKeyRate'; rate: number }
   | { type: 'addRoadLane'; route: string }
   | { type: 'setTax'; tax: TaxKind; rate: number }
-  | { type: 'setTransfers'; perCapita: number };
+  | { type: 'setTransfers'; perCapita: number }
+  | { type: 'setSubsidy'; good: GoodId; perUnit: number };
