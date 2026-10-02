@@ -5,11 +5,13 @@ import {
   buildingsFileSchema,
   goodsFileSchema,
   recipesFileSchema,
+  shocksFileSchema,
   type Balance,
   type Building,
   type Good,
   type Recipe,
   type Scenario,
+  type Shock,
 } from './schemas';
 
 export interface GameData {
@@ -17,6 +19,7 @@ export interface GameData {
   goods: Good[];
   recipes: Recipe[];
   buildings: Building[];
+  shocks: Shock[];
 }
 
 export interface RawGameData {
@@ -24,6 +27,7 @@ export interface RawGameData {
   goods: unknown;
   recipes: unknown;
   buildings: unknown;
+  shocks: unknown;
 }
 
 export class GameDataError extends Error {
@@ -65,6 +69,14 @@ function checkReferences(data: GameData, issues: string[]): void {
   checkUniqueIds('goods.json', data.goods, issues);
   checkUniqueIds('recipes.json', data.recipes, issues);
   checkUniqueIds('buildings.json', data.buildings, issues);
+  checkUniqueIds('shocks.json', data.shocks, issues);
+  for (const shock of data.shocks) {
+    for (const effect of shock.effects) {
+      if (!data.buildings.some((b) => b.id === effect.building)) {
+        issues.push(`shocks.json: ${shock.id}: неизвестное здание "${effect.building}"`);
+      }
+    }
+  }
 
   for (const recipe of data.recipes) {
     const where = `recipes.json: ${recipe.id}`;
@@ -90,6 +102,9 @@ function checkReferences(data: GameData, issues: string[]): void {
   if (data.buildings.filter((b) => b.kind === 'route').length !== 1) {
     issues.push('buildings.json: нужно ровно одно здание вида route (полоса дороги)');
   }
+  if (data.buildings.filter((b) => b.kind === 'fleet').length !== 1) {
+    issues.push('buildings.json: нужно ровно одно здание вида fleet (автопарк)');
+  }
   for (const good of Object.keys(data.balance.cpiWeights)) {
     needGood('balance.json: cpiWeights', good);
     if (!(good in data.balance.demand.goods)) {
@@ -105,14 +120,16 @@ export function loadGameData(raw: RawGameData): GameData {
   const goods = parseFile('goods.json', goodsFileSchema, raw.goods, issues);
   const recipes = parseFile('recipes.json', recipesFileSchema, raw.recipes, issues);
   const buildings = parseFile('buildings.json', buildingsFileSchema, raw.buildings, issues);
+  const shocks = parseFile('shocks.json', shocksFileSchema, raw.shocks, issues);
 
-  if (!balance || !goods || !recipes || !buildings) throw new GameDataError(issues);
+  if (!balance || !goods || !recipes || !buildings || !shocks) throw new GameDataError(issues);
 
   const data: GameData = {
     balance,
     goods: goods.goods,
     recipes: recipes.recipes,
     buildings: buildings.buildings,
+    shocks: shocks.shocks,
   };
   checkReferences(data, issues);
   if (issues.length > 0) throw new GameDataError(issues);

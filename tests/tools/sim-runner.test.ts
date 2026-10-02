@@ -1,0 +1,33 @@
+import { describe, expect, it } from 'vitest';
+import { formatComparison, formatTable, main, parseArgs, simulate } from '../../tools/sim-runner';
+
+describe('sim-runner', () => {
+  it('параметры по умолчанию и разбор флагов', () => {
+    expect(parseArgs([])).toEqual({ scenario: 'baseline', seed: 42, policy: 'passive', turns: 24, format: 'table' });
+    expect(parseArgs(['--policy', 'hawk', '--turns', '6', '--format', 'csv']).policy).toBe('hawk');
+    expect(() => parseArgs(['--policy', 'nope'])).toThrow(/Политика/);
+    expect(() => parseArgs(['--level', '05'])).toThrow(/M11/);
+    expect(() => parseArgs(['--turns', '0'])).toThrow(/turns/);
+  });
+
+  it('строка на каждый ход плюс старт; таблица с заголовком', () => {
+    const rows = simulate({ scenario: 'baseline', seed: 42, policy: 'passive', turns: 6 });
+    expect(rows).toHaveLength(7);
+    const table = formatTable(rows).split('\n');
+    expect(table[0]).toMatch(/ход\s+ИПЦ/);
+    expect(table).toHaveLength(8);
+  });
+
+  it('у разных стратегий разные исходы: ставка ↑ — ниже цены, ставка ↓ — выше', () => {
+    const at = (policy: string) => simulate({ scenario: 'baseline', seed: 42, policy, turns: 18 }).at(-1)!;
+    expect(at('hawk').cpi).toBeLessThan(at('passive').cpi);
+    expect(at('dove').cpi).toBeGreaterThan(at('passive').cpi);
+    expect(at('hawk').unemployment).toBeGreaterThan(at('passive').unemployment);
+  });
+
+  it('--policy all печатает сравнение ботов', () => {
+    const out = main(['--policy', 'all', '--turns', '4']);
+    expect(out).toMatch(/# сравнение ботов/);
+    expect(formatComparison({ passive: simulate({ scenario: 'baseline', seed: 42, policy: 'passive', turns: 2 }) })).toMatch(/passive/);
+  });
+});

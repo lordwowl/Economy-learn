@@ -79,15 +79,77 @@ export const routeBuildingSchema = z.strictObject({
   costPerLength: nonNegative,
 });
 
+/** Единица автопарка перевозчика: сколько работы (груз × длина) за ход она даёт. */
+export const fleetBuildingSchema = z.strictObject({
+  ...buildingBase,
+  kind: z.literal('fleet'),
+  shape: z.literal('pentagon'),
+  workCapacity: positive,
+  cost: nonNegative,
+});
+
 export const buildingSchema = z.discriminatedUnion('kind', [
   producerBuildingSchema,
   storageBuildingSchema,
   routeBuildingSchema,
+  fleetBuildingSchema,
 ]);
 
 export const buildingsFileSchema = z.strictObject({
   buildings: z.array(buildingSchema).min(1),
 });
+
+// ---------- shocks.json ----------
+// Шоки — нейтрально названные внешние события (GDD 2): неурожай, авария на НПЗ.
+
+export const shockSchema = z.strictObject({
+  id,
+  nameKey: i18nKey,
+  /** Сколько ходов действует, включая ход начала. */
+  turns,
+  effects: z
+    .array(
+      z.strictObject({
+        /** Мощность зданий × multiplier (модификатор шока, GDD 5.3). */
+        type: z.literal('capacity'),
+        building: id,
+        /** Только в этой провинции; без поля — по всей стране. */
+        province: id.optional(),
+        multiplier: z.number().min(0),
+      }),
+    )
+    .min(1),
+});
+
+export const shocksFileSchema = z.strictObject({
+  shocks: z.array(shockSchema),
+});
+
+// ---------- explanations.json ----------
+// Шаблоны объяснений (GDD 6): какой ключ ru.json описывает метрику и каждую её причину.
+// В шаблоне {имя} — один сегмент id (без точек): price.{good}.{province}.
+
+const pattern = z.string().regex(/^[a-zA-Z0-9{}.]+$/);
+
+export const explanationsFileSchema = z.strictObject({
+  groups: z.array(
+    z.strictObject({
+      id,
+      metrics: z.array(z.strictObject({ pattern, key: i18nKey })).min(1),
+      causes: z.array(
+        z.strictObject({
+          pattern,
+          /** Текст, когда причина увеличила метрику. */
+          up: i18nKey,
+          /** Текст, когда уменьшила; без поля — тот же, что up. */
+          down: i18nKey.optional(),
+        }),
+      ),
+    }),
+  ),
+});
+
+export type Explanations = z.infer<typeof explanationsFileSchema>;
 
 // ---------- balance.json ----------
 // Ставки (ключевая, нейтральная, спред, цель по инфляции) — годовые доли: 0.06 = 6% годовых.
@@ -174,6 +236,12 @@ export const balanceSchema = z.strictObject({
     entryMinUtilization: share,
     /** Минимальная наценка для входа новой фирмы. */
     entryMinMarkup: z.number().finite(),
+    /** Желаемый долг населения в месяцах дохода при нейтральной ставке. */
+    householdTargetDebtToMonthlyIncome: nonNegative,
+    /** На сколько месяцев дохода снижается желаемый долг на каждую единицу (ставка − нейтральная). */
+    householdDebtRateSensitivity: nonNegative,
+    /** Какую долю разрыва (желаемый − текущий долг) население закрывает за месяц: кредит или погашение. */
+    householdDebtAdjustSpeed: share,
   }),
   expectations: z.strictObject({
     /** π_цель. */
@@ -265,6 +333,11 @@ export const scenarioSchema = z.strictObject({
     storages: z.array(z.strictObject({ building: id, province: id })),
     stock: z.array(z.strictObject({ province: id, good: id, quantity: positive })),
   }),
+  /** Автопарки перевозчиков в единицах truckFleet; "auto" — столько, чтобы стартовые перевозки загружали парк не выше entryMinUtilization. */
+  fleet: z.strictObject({
+    private: z.union([z.number().int().nonnegative(), z.literal('auto')]),
+    state: z.number().int().nonnegative(),
+  }),
   /** Дороги между провинциями. lanes = 0 — дорогу можно построить, но пока не проехать. */
   routes: z.array(
     z.strictObject({
@@ -279,10 +352,12 @@ export const scenarioSchema = z.strictObject({
 
 export type Scenario = z.infer<typeof scenarioSchema>;
 export type Lag = z.infer<typeof lagSchema>;
+export type Shock = z.infer<typeof shockSchema>;
 export type Good = z.infer<typeof goodSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
 export type Building = z.infer<typeof buildingSchema>;
 export type ProducerBuilding = z.infer<typeof producerBuildingSchema>;
 export type StorageBuilding = z.infer<typeof storageBuildingSchema>;
 export type RouteBuilding = z.infer<typeof routeBuildingSchema>;
+export type FleetBuilding = z.infer<typeof fleetBuildingSchema>;
 export type Balance = z.infer<typeof balanceSchema>;

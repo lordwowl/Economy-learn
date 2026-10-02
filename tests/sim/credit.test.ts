@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getGameData } from '../../src/data';
 import type { Firm } from '../../src/sim/state';
-import { borrowForPlan, chargeInterest, liquidate, repay } from '../../src/sim/systems/credit';
+import { borrowForPlan, chargeInterest, householdTargetDebt, liquidate, repay } from '../../src/sim/systems/credit';
 import { nextWage } from '../../src/sim/systems/labor';
 import { baseline, run, totalMoney } from './helpers';
 
@@ -73,6 +73,29 @@ describe('кредит (GDD 5.8)', () => {
   });
 });
 
+describe('кредит населению (GDD 5.5)', () => {
+  const hh = { population: 100, laborForce: 60, cash: 0, referenceSpendingPerCapita: 1, debt: 0, bonds: 0, income: 0, lastIncome: 1000 };
+
+  it('желаемый долг = d0 × доход при нейтральной ставке и меньше при высокой', () => {
+    expect(householdTargetDebt(hh, balance.demand.neutralRate, balance)).toBeCloseTo(
+      balance.credit.householdTargetDebtToMonthlyIncome * 1000,
+      9,
+    );
+    expect(householdTargetDebt(hh, balance.demand.neutralRate + 0.05, balance)).toBeLessThan(
+      householdTargetDebt(hh, balance.demand.neutralRate, balance),
+    );
+    expect(householdTargetDebt(hh, 10, balance)).toBe(0);
+  });
+
+  it('ставка ↑ → население гасит кредиты (через лаг спроса), долг ниже, чем без повышения', () => {
+    const passive = run(12);
+    const hike = run(12, (t) => (t === 3 ? [{ type: 'setKeyRate', rate: 0.12 }] : []));
+    const debt = (s: (typeof passive.states)[number]) => s.provinces.reduce((a, p) => a + p.households.debt, 0);
+    expect(debt(hike.states[4]!)).toBeCloseTo(debt(passive.states[4]!), 6);
+    expect(debt(hike.states[8]!)).toBeLessThan(debt(passive.states[8]!));
+  });
+});
+
 describe('зарплаты липкие вниз (GDD 5.7)', () => {
   it('при огромной безработице падают не быстрее maxMonthlyWageCut, вклады сходятся', () => {
     const { wage, cause } = nextWage(10, 0.6, 0, balance.labor, 1);
@@ -91,16 +114,17 @@ describe('вход и выход фирм', () => {
     }
   });
 
-  it('не хватает мощностей пекарен на юге → в кредит строится новая пекарня, деньги − долги сохраняются', () => {
+  it('не хватает мощностей пекарен → в кредит строится новая пекарня, деньги − долги сохраняются', () => {
+    // Пекарни остаются только на севере: мощностей на страну не хватает.
     const r = run(24, () => [], undefined, (sc) => {
-      sc.firms.find((f) => f.building === 'bakery' && f.province === 'south')!.count = 1;
+      sc.firms = sc.firms.filter((f) => f.building !== 'bakery' || f.province === 'north');
     });
     const opened = r.states.flatMap((s) => s.metrics.firmsOpened);
-    expect(opened.some((id) => id.startsWith('bakery-south'))).toBe(true);
+    expect(opened.some((id) => id.startsWith('bakery-'))).toBe(true);
     const start = totalMoney(r.states[0]!);
     for (const s of r.states) expect(totalMoney(s)).toBeCloseTo(start, 6);
 
-    const id = opened.find((x) => x.startsWith('bakery-south'))!;
+    const id = opened.find((x) => x.startsWith('bakery-'))!;
     const turn = r.states.findIndex((s) => s.metrics.firmsOpened.includes(id));
     const lane = data.buildings.find((b) => b.id === 'bakery');
     if (lane?.kind !== 'producer') throw new Error('нет пекарни');

@@ -75,6 +75,10 @@ describe('demand (GDD 5.5)', () => {
     laborForce: 60,
     cash: (refSpending * 100) / spendingShare(balance.demand.neutralRate, balance.demand),
     referenceSpendingPerCapita: refSpending,
+    debt: 0,
+    bonds: 0,
+    income: 0,
+    lastIncome: 0,
   };
 
   it('при опорных цене и бюджете спрос = base × N', () => {

@@ -1,0 +1,65 @@
+{
+  "groups": [
+    {
+      "id": "price",
+      "metrics": [
+        { "pattern": "price.firm.{firm}", "key": "metric.priceFirm" },
+        { "pattern": "price.{good}.{province}", "key": "metric.priceProvince" },
+        { "pattern": "price.{good}", "key": "metric.price" }
+      ],
+      "causes": [
+        { "pattern": "input.{good}", "up": "cause.input.up", "down": "cause.input.down" },
+        { "pattern": "wage", "up": "cause.wageCost.up", "down": "cause.wageCost.down" },
+        { "pattern": "logistics", "up": "cause.logistics.up", "down": "cause.logistics.down" },
+        { "pattern": "markup", "up": "cause.markup.up", "down": "cause.markup.down" },
+        { "pattern": "tax.sales", "up": "cause.salesTaxInPrice.up", "down": "cause.salesTaxInPrice.down" },
+        { "pattern": "subsidy", "up": "cause.subsidy.up", "down": "cause.subsidy.down" },
+        { "pattern": "priceCeiling", "up": "cause.priceCeiling.up", "down": "cause.priceCeiling.down" },
+        { "pattern": "blackMarket", "up": "cause.blackMarket.up", "down": "cause.blackMarket.down" },
+        { "pattern": "reserve", "up": "cause.reserveInPrice.up", "down": "cause.reserveInPrice.down" },
+        { "pattern": "expectations", "up": "cause.expectationsInPrice.up", "down": "cause.expectationsInPrice.down" }
+      ]
+    },
+    {
+      "id": "cpi",
+      "metrics": [{ "pattern": "cpi", "key": "metric.cpi" }],
+      "causes": [{ "pattern": "price.{good}", "up": "cause.consumerPrice.up", "down": "cause.consumerPrice.down" }]
+    },
+    {
+      "id": "ppi",
+      "metrics": [{ "pattern": "ppi", "key": "metric.ppi" }],
+      "causes": [{ "pattern": "producerPrice.{good}", "up": "cause.producerPrice.up", "down": "cause.producerPrice.down" }]
+    },
+    {
+      "id": "wage",
+      "metrics": [{ "pattern": "wage", "key": "metric.wage" }],
+      "causes": [
+        { "pattern": "labor.unemploymentGap", "up": "cause.laborGap.up", "down": "cause.laborGap.down" },
+        { "pattern": "expectations", "up": "cause.expectationsInWage.up", "down": "cause.expectationsInWage.down" },
+        { "pattern": "labor.stickyWages", "up": "cause.stickyWages.up" }
+      ]
+    },
+    {
+      "id": "unemployment",
+      "metrics": [{ "pattern": "unemployment", "key": "metric.unemployment" }],
+      "causes": [{ "pattern": "employment.{sector}", "up": "cause.jobsCut.up", "down": "cause.jobsCut.down" }]
+    },
+    {
+      "id": "budget",
+      "metrics": [{ "pattern": "budget.balance", "key": "metric.budgetBalance" }],
+      "causes": [
+        { "pattern": "tax.sales", "up": "cause.budget.salesTax" },
+        { "pattern": "tax.profit", "up": "cause.budget.profitTax" },
+        { "pattern": "tax.income", "up": "cause.budget.incomeTax" },
+        { "pattern": "stateFirms", "up": "cause.budget.stateFirms" },
+        { "pattern": "reserveSales", "up": "cause.budget.reserveSales" },
+        { "pattern": "stateCarrier", "up": "cause.budget.stateCarrier" },
+        { "pattern": "transfers", "up": "cause.budget.transfers" },
+        { "pattern": "construction", "up": "cause.budget.construction" },
+        { "pattern": "interest", "up": "cause.budget.interest" },
+        { "pattern": "subsidies", "up": "cause.budget.subsidies" },
+        { "pattern": "reserve", "up": "cause.budget.reserve" }
+      ]
+    }
+  ]
+}

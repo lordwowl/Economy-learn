@@ -39,6 +39,14 @@ export interface Households {
   cash: number;
   /** B_ref: стартовые траты на душу в этой провинции. */
   referenceSpendingPerCapita: number;
+  /** Долг банку (потребительский кредит). */
+  debt: number;
+  /** Государственные облигации у населения (сбережения, приносят проценты; не тратятся на покупки). */
+  bonds: number;
+  /** Доходы за текущий ход (зарплата, трансферты, дивиденды, проценты банка) — копятся по ходу хода. */
+  income: number;
+  /** Доходы за прошлый ход: от них считается желаемый долг. */
+  lastIncome: number;
 }
 
 export interface Province {
@@ -66,6 +74,18 @@ export interface MarketGood {
   /** Стартовая средняя цена — база ИПЦ. */
   referencePrice: number;
   provinces: Record<string, ProvinceMarket>;
+  /** Цена производителей: средняя цена фирм, взвешенная по выпуску (для ИЦП). */
+  producerPrice: number;
+  /** Стартовая цена производителей — база ИЦП. */
+  producerReferencePrice: number;
+  /** Вес товара в ИЦП: доля в стартовом выпуске по стоимости. */
+  ppiWeight: number;
+}
+
+export interface ActiveShock {
+  id: string;
+  /** Последний ход действия. */
+  until: number;
 }
 
 export interface Route {
@@ -76,15 +96,32 @@ export interface Route {
   lanes: number;
 }
 
-/** Агрегированный частный перевозчик (GDD 5.17). */
-export interface Logistics {
+export type CarrierId = 'private' | 'state';
+
+/** Перевозчик (GDD 5.17): частный (ИИ) или государственный (строит игрок, возит без наценки). */
+export interface Carrier {
+  id: CarrierId;
+  /** Наценка к себестоимости перевозки. */
+  markup: number;
   cash: number;
+  debt: number;
   /** Запас топлива для перевозок. */
   fuel: number;
-  /** Заявленная работа (груз × длина) за последние ходы, последняя — в конце. */
+  /** Готовые единицы автопарка. */
+  fleet: number;
+  /** Единицы в постройке. */
+  fleetOrdered: number;
+  /** Заявленная этому перевозчику работа (груз × длина) за последние ходы, последняя — в конце. */
   workHistory: number[];
   lastWork: number;
   lastLabor: number;
+  /** Выручка за доставку за прошлый ход. */
+  lastRevenue: number;
+}
+
+export interface Logistics {
+  /** Перевозчики по порядку выбора грузоотправителями: дешёвые первыми. */
+  carriers: Carrier[];
   /** Заявки на перевозку за прошлый ход по участкам (дорога + направление), отдельно для рынка входов и потребительского. */
   requested: Record<TradePhase, Record<string, number>>;
 }
@@ -112,6 +149,7 @@ export type TaxKind = 'sales' | 'profit' | 'income';
 export interface Government {
   /** Деньги на счёте. В конце хода дефицит закрывается займом, профицит гасит долг. */
   cash: number;
+  /** Госдолг: облигации у населения + остаток, который держит банк. */
   debt: number;
   taxes: Record<TaxKind, number>;
   transfersPerCapita: number;
@@ -154,14 +192,19 @@ export type PendingEffect =
   | { type: 'subsidy'; good: GoodId; delta: number }
   | { type: 'roadLane'; route: string }
   | { type: 'firmReady'; firm: string; capacity: number }
-  | { type: 'storageReady'; storage: string };
+  | { type: 'storageReady'; storage: string }
+  | { type: 'fleetReady'; carrier: CarrierId };
 
 export interface Metrics {
   cpi: number;
+  /** Индекс цен производителей (GDD 5.13), старт = 100. */
+  ppi: number;
   inflationMoM: number;
   inflationYoY: number | null;
   unemployment: number;
   employment: number;
+  /** Занятые по отраслям: здания (farm, mill, …) и logistics. Σ = employment. */
+  employmentBySector: Record<string, number>;
   wage: number;
   realWage: number;
   householdSpending: number;
@@ -205,6 +248,7 @@ export interface WorldState {
   government: Government;
   bank: Bank;
   reserve: Reserve;
+  activeShocks: ActiveShock[];
   expectations: {
     /** π_a, месячная. */
     adaptive: number;
@@ -227,6 +271,10 @@ export type Action =
   | { type: 'setSubsidy'; good: GoodId; perUnit: number }
   | { type: 'setPriceCeiling'; good: GoodId; price: number | null }
   | { type: 'buildStorage'; building: string; province: string }
+  /** Внешний шок из shocks.json (сценарий уровня или песочница). */
+  | { type: 'shock'; shock: string }
+  /** +1 единица госпарка (из бюджета, через buildTurns). */
+  | { type: 'buildStateFleet' }
   /** Закупка в резерв на рынке провинции в этом ходу. */
   | { type: 'reserveBuy'; good: GoodId; province: string; quantity: number }
   /** Интервенция: продажа из резерва на рынке провинции в этом ходу. */

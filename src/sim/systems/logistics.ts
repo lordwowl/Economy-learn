@@ -73,8 +73,8 @@ export function laborPerUnit(path: Path, logistics: Balance['logistics']): numbe
 }
 
 /** Тариф за 1 ед. груза: (топливо × цена топлива + труд × зарплата) × (1 + наценка перевозчика). */
-export function tariff(path: Path, fuelPrice: number, wage: number, logistics: Balance['logistics']): number {
-  return (fuelPerUnit(path, logistics) * fuelPrice + laborPerUnit(path, logistics) * wage) * (1 + logistics.markup);
+export function tariff(path: Path, fuelPrice: number, wage: number, logistics: Balance['logistics'], markup: number): number {
+  return (fuelPerUnit(path, logistics) * fuelPrice + laborPerUnit(path, logistics) * wage) * (1 + markup);
 }
 
 export interface Shipment {
@@ -95,7 +95,8 @@ export interface Shipment {
 export interface ShipmentLimits {
   /** Сколько пропускной способности участков (legKey) доступно этим перевозкам. */
   capacityLeft: Record<string, number>;
-  fuel: number;
+  /** Сколько работы (груз × длина) могут сделать перевозчики: парк и топливо. */
+  work: number;
   labor: number;
 }
 
@@ -112,7 +113,7 @@ export interface GoodBalance {
  *  1) заявка p к q пропорциональна остатку q среди достижимых из p;
  *  2) если у q просят больше, чем есть, — пропорционально урезается;
  *  3) если по дороге хотят провезти больше её остатка — урезаются все перевозки через неё, всех товаров;
- *  4) если не хватает топлива или труда перевозчика — урезаются все перевозки.
+ *  4) если не хватает парка и топлива перевозчиков (работы) или труда — урезаются все перевозки.
  * Один проход: результат всегда допустим (не нарушает ни одного ограничения), хотя не всегда максимален.
  */
 export function planShipments(
@@ -160,13 +161,13 @@ export function planShipments(
     s.quantity *= factor;
   }
 
-  let fuel = 0;
+  let work = 0;
   let labor = 0;
   for (const s of shipments) {
-    fuel += s.quantity * fuelPerUnit(s.path, logistics);
+    work += s.quantity * s.path.length;
     labor += s.quantity * laborPerUnit(s.path, logistics);
   }
-  const resourceFactor = Math.min(1, fuel > 0 ? Math.max(0, limits.fuel) / fuel : 1, labor > 0 ? Math.max(0, limits.labor) / labor : 1);
+  const resourceFactor = Math.min(1, work > 0 ? Math.max(0, limits.work) / work : 1, labor > 0 ? Math.max(0, limits.labor) / labor : 1);
   if (resourceFactor < 1) for (const s of shipments) s.quantity *= resourceFactor;
 
   return shipments;

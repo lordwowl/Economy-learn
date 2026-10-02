@@ -44,3 +44,13 @@ export function breakdownChange(turn: number, metric: string, before: Breakdown,
   }
   return makeCauseEvent(turn, metric, contributions);
 }
+
+/** Сводное событие за несколько ходов: вклады одинаковых причин складываются (для отчёта уровня). */
+export function aggregate(events: readonly CauseEvent[], metric: string, label = 'total'): CauseEvent {
+  const contributions: Breakdown = {};
+  for (const e of events) {
+    if (e.metric !== metric) continue;
+    for (const c of e.causes) contributions[c.ref] = (contributions[c.ref] ?? 0) + c.value;
+  }
+  return { ...makeCauseEvent(0, metric, contributions), id: `${label}:${metric}` };
+}

@@ -3,11 +3,12 @@ import balance from '../../data/balance.json';
 import buildings from '../../data/buildings.json';
 import goods from '../../data/goods.json';
 import recipes from '../../data/recipes.json';
+import shocks from '../../data/shocks.json';
 import ru from '../../src/i18n/ru.json';
 import scenario from '../../data/scenarios/baseline.json';
 import { GameDataError, getGameData, loadGameData, loadScenario, type RawGameData, type Scenario } from '../../src/data';
 
-const raw = (): RawGameData => structuredClone({ balance, goods, recipes, buildings });
+const raw = (): RawGameData => structuredClone({ balance, goods, recipes, buildings, shocks });
 
 function issuesOf(data: RawGameData): string[] {
   try {
@@ -30,7 +31,7 @@ describe('данные игры из data/', () => {
 
   it('у каждого товара и здания есть строка в ru.json', () => {
     const data = getGameData();
-    const keys = [...data.goods, ...data.buildings].map((x) => x.nameKey);
+    const keys = [...data.goods, ...data.buildings, ...data.shocks].map((x) => x.nameKey);
     for (const key of keys) expect(Object.keys(ru), key).toContain(key);
   });
 

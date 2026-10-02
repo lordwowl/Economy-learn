@@ -15,7 +15,7 @@ import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type Cau
 import { schedule, spreadOverLag, takeDue } from './delay';
 import type { Rng } from './rng';
 import type { Action, Firm, GoodId, RouteMetrics, WorldState } from './state';
-import { borrowForPlan, chargeInterest, entryRoi, liquidate, loanRate, repay } from './systems/credit';
+import { borrowForPlan, chargeInterest, entryRoi, householdCredit, liquidate, loanRate, repay } from './systems/credit';
 import { planHouseholdPurchases } from './systems/demand';
 import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget } from './systems/government';
 import { nextExpectations } from './systems/expectations';
@@ -26,7 +26,7 @@ import { affordableRuns, costPerRun, coverage, feasibleRuns, lossOutputFactor, p
 import { clearMarket } from './market';
 import { freeSpace } from './systems/reserve';
 import { Trade, type TradeBid } from './trade';
-import { mean } from './units';
+import { mean, MONTHS_PER_YEAR } from './units';
 
 export interface StepResult {
   state: WorldState;
@@ -90,6 +90,21 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'storageReady', storage: id });
       break;
     }
+    case 'shock': {
+      const shock = data.shocks.find((s) => s.id === action.shock);
+      if (!shock) throw new Error(`нет шока "${action.shock}"`);
+      state.activeShocks.push({ id: shock.id, until: turn + shock.turns - 1 });
+      break;
+    }
+    case 'buildStateFleet': {
+      const fleet = data.buildings.find((b) => b.kind === 'fleet');
+      if (fleet?.kind !== 'fleet') throw new Error('в данных нет автопарка');
+      addSpending(state, BUDGET.construction, fleet.cost);
+      payHouseholds(state, fleet.cost, (p) => p.households.laborForce);
+      state.logistics.carriers.find((c) => c.id === 'state')!.fleetOrdered += 1;
+      state.pending = schedule(state.pending, turn + fleet.buildTurns, { type: 'fleetReady', carrier: 'state' });
+      break;
+    }
     case 'reserveBuy':
     case 'reserveRelease':
       // Исполняются в торговле этого хода (см. step).
@@ -137,7 +152,12 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   // 1. Решения и отложенные эффекты.
   state.government.revenue = {};
   state.government.spending = {};
+  for (const p of state.provinces) {
+    p.households.lastIncome = p.households.income;
+    p.households.income = 0;
+  }
   for (const action of actions) applyAction(state, action, turn, data);
+  state.activeShocks = state.activeShocks.filter((s) => s.until >= turn);
   const { due, queue } = takeDue(state.pending, turn);
   state.pending = queue;
   for (const effect of due) {
@@ -148,6 +168,11 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       subsidies[effect.good] = (subsidies[effect.good] ?? 0) + effect.delta;
     }
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
+    if (effect.type === 'fleetReady') {
+      const carrier = state.logistics.carriers.find((c) => c.id === effect.carrier)!;
+      carrier.fleet += 1;
+      carrier.fleetOrdered -= 1;
+    }
     if (effect.type === 'storageReady') {
       const storage = state.reserve.storages.find((s) => s.id === effect.storage);
       if (storage) storage.ready = true;
@@ -167,7 +192,20 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     return prices;
   };
 
-  // 2. Планы; не хватает денег на выгодный план — оборотный кредит.
+  /** Модификатор шока (GDD 5.3): произведение множителей мощности действующих шоков для здания фирмы. */
+  const shockMultiplier = (firm: Firm): number => {
+    let m = 1;
+    for (const active of state.activeShocks) {
+      for (const effect of data.shocks.find((s) => s.id === active.id)?.effects ?? []) {
+        if (effect.building === firm.building && (effect.province === undefined || effect.province === firm.province)) {
+          m *= effect.multiplier;
+        }
+      }
+    }
+    return m;
+  };
+
+  // 2. Планы; не хватает денег на выгодный план — оборотный кредит.  Шок урезает доступную мощность.
   const plan = new Map<string, number>();
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
@@ -175,7 +213,10 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const unitCost = costPerRun(recipe, prices, state.wage) / recipe.output.amount;
     const netPrice =
       firm.price * (1 - state.government.taxes.sales) + (state.government.subsidies[recipe.output.good] ?? 0);
-    const planned = plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms);
+    const planned = Math.min(
+      plannedRuns(firm, recipe, balance.firms) * lossOutputFactor(netPrice, unitCost, balance.firms),
+      firm.capacity * shockMultiplier(firm),
+    );
     if (planned > affordableRuns(firm, recipe, prices, state.wage)) {
       borrowForPlan(firm, recipe, planned, prices, state.wage, state.government.taxes.sales, balance.credit);
     }
@@ -185,7 +226,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
   let firmLabor = 0;
   for (const firm of state.firms) firmLabor += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
-  const scale = laborScale(firmLabor + state.logistics.lastLabor, laborForce);
+  const carrierLabor = state.logistics.carriers.reduce((s, c) => s + c.lastLabor, 0);
+  const scale = laborScale(firmLabor + carrierLabor, laborForce);
   for (const [id, runs] of plan) plan.set(id, runs * scale);
   const laborRequired = firmLabor * scale;
 
@@ -199,10 +241,18 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     const price = Math.min(market.provinces[action.province]?.price ?? market.price, state.government.priceCeilings[action.good] ?? Infinity);
     trade.offerFromReserve(action.good, action.province, Math.min(Math.max(0, action.quantity), stock), price);
   }
+  // Топливо перевозчиков: ожидаемая работа всех перевозчиков делится между ними в порядке выбора
+  // (дешёвые первыми) в пределах парка — так новый госпарк сразу заправляется под свою долю.
   const logisticsCfg = balance.logistics;
-  const expectedWork = mean(state.logistics.workHistory);
-  const fuelTarget = expectedWork * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
-  trade.buyLogisticsFuel(Math.max(0, fuelTarget - state.logistics.fuel));
+  const fleetUnit = data.buildings.find((b) => b.kind === 'fleet');
+  let expectedWork = state.logistics.carriers.reduce((s, c) => s + mean(c.workHistory), 0);
+  for (const carrier of [...state.logistics.carriers].sort((a, b) => a.markup - b.markup || a.id.localeCompare(b.id))) {
+    const capacity = fleetUnit?.kind === 'fleet' ? carrier.fleet * fleetUnit.workCapacity : 0;
+    const mine = Math.min(capacity, expectedWork);
+    expectedWork -= mine;
+    const fuelTarget = mine * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
+    trade.buyCarrierFuel(carrier, fuelTarget - carrier.fuel);
+  }
 
   const firmById = new Map(state.firms.map((f) => [f.id, f]));
   const inputBids = new Map<GoodId, TradeBid[]>();
@@ -269,6 +319,7 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       const pm = m.provinces[province.id];
       if (pm) markets[good] = pm;
     }
+    householdCredit(province.households, state, balance);
     const hp = planHouseholdPurchases(province.households, state.demandRate, markets, balance.demand);
     for (const [good, q] of Object.entries(hp.quantities)) {
       const bids = consumerBids.get(good) ?? [];
@@ -383,20 +434,29 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   }
   payWages(state, trade.logisticsWages);
   const employment = productionLabor + trade.logisticsLabor;
+  const employmentBySector: Record<string, number> = { logistics: trade.logisticsLabor };
+  for (const firm of state.firms) {
+    employmentBySector[firm.building] = (employmentBySector[firm.building] ?? 0) + firm.lastRuns * recipeOf(firm).labor;
+  }
 
   // 6a. Заказы: продажи + неудовлетворённый спрос, разнесённый по производителям пропорционально мощности.
   const capacityByGood: Record<GoodId, number> = {};
   for (const firm of state.firms) capacityByGood[outputOf(firm)] = (capacityByGood[outputOf(firm)] ?? 0) + firm.capacity;
   for (const firm of state.firms) {
     const good = outputOf(firm);
-    const unmetShare = ((trade.unmetByGood[good] ?? 0) * firm.capacity) / (capacityByGood[good] ?? 1);
+    const totalCapacity = capacityByGood[good] ?? 0;
+    const unmetShare = totalCapacity > 0 ? ((trade.unmetByGood[good] ?? 0) * firm.capacity) / totalCapacity : 0;
     const sold = trade.soldByFirm.get(firm.id) ?? 0;
     firm.lastSales = sold;
     firm.ordersHistory = [...firm.ordersHistory, sold + unmetShare].slice(-balance.firms.salesAverageTurns);
   }
-  state.logistics.workHistory = [...state.logistics.workHistory, trade.requestedWork].slice(-balance.firms.salesAverageTurns);
-  state.logistics.lastWork = trade.work;
-  state.logistics.lastLabor = trade.logisticsLabor;
+  for (const carrier of state.logistics.carriers) {
+    const t = trade.carriers[carrier.id];
+    carrier.workHistory = [...carrier.workHistory, t.requestedWork].slice(-balance.firms.salesAverageTurns);
+    carrier.lastWork = t.work;
+    carrier.lastLabor = t.labor;
+    carrier.lastRevenue = t.revenue;
+  }
   state.logistics.requested = trade.requested;
 
   // 6b. Цены рынков: средняя цена сделок в провинции (с доставкой), затем средняя по стране.
@@ -436,15 +496,38 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     if (firm.owner === 'state') addRevenue(state, BUDGET.stateFirms, dividend);
     else payHouseholds(state, dividend, (p) => p.households.population);
   }
-  {
+  // Перевозчики: частный платит проценты, гасит долг, платит дивиденды и расширяет парк; госперевозчик рассчитывается с бюджетом.
+  const fleetBuilding = data.buildings.find((b) => b.kind === 'fleet');
+  for (const carrier of state.logistics.carriers) {
+    if (carrier.id === 'state') {
+      if (carrier.cash >= 0) addRevenue(state, BUDGET.stateCarrier, carrier.cash);
+      else addSpending(state, BUDGET.stateCarrier, -carrier.cash);
+      carrier.cash = 0;
+      continue;
+    }
+    chargeInterest(carrier, state, balance.credit);
     const fuelPrice = state.market[logisticsCfg.fuelGood]?.price ?? 0;
-    const expected = mean(state.logistics.workHistory);
-    const cost = expected * logisticsCfg.fuelPerUnitLength * fuelPrice + state.logistics.lastLabor * state.wage;
-    const dividend = Math.max(0, state.logistics.cash - balance.firms.cashBufferTurns * cost) * balance.firms.dividendPayoutShare;
+    const cost = mean(carrier.workHistory) * logisticsCfg.fuelPerUnitLength * fuelPrice + carrier.lastLabor * state.wage;
+    const buffer = balance.firms.cashBufferTurns * cost;
+    repay(carrier, buffer);
+    const dividend = Math.max(0, carrier.cash - buffer) * balance.firms.dividendPayoutShare;
     if (dividend > 0) {
-      state.logistics.cash -= dividend;
+      carrier.cash -= dividend;
       payHouseholds(state, dividend, (p) => p.households.population);
     }
+    // Расширение парка: загрузка высокая и окупаемость выше ставки кредита → +1 единица в кредит.
+    if (fleetBuilding?.kind !== 'fleet' || carrier.fleetOrdered > 0) continue;
+    const capacity = carrier.fleet * fleetBuilding.workCapacity;
+    const utilization = capacity > 0 ? mean(carrier.workHistory) / capacity : 1;
+    const revenuePerWork = carrier.lastWork > 0 ? carrier.lastRevenue / carrier.lastWork : 0;
+    const monthlyProfit = fleetBuilding.workCapacity * revenuePerWork * (carrier.markup / (1 + carrier.markup));
+    const roi = fleetBuilding.cost > 0 ? (monthlyProfit * MONTHS_PER_YEAR) / fleetBuilding.cost : Infinity;
+    if (utilization < balance.credit.entryMinUtilization) continue;
+    if (roi <= loanRate(state, balance.credit) + balance.credit.expansionRoiMargin) continue;
+    carrier.debt += fleetBuilding.cost;
+    carrier.fleetOrdered += 1;
+    payHouseholds(state, fleetBuilding.cost, (p) => p.households.laborForce);
+    state.pending = schedule(state.pending, turn + fleetBuilding.buildTurns, { type: 'fleetReady', carrier: carrier.id });
   }
 
   // 6d. Закрытие: частная фирма после N месяцев убытков подряд. Долг гасится остатком денег, остальное банк списывает.
@@ -547,6 +630,25 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     firm.price = sumBreakdown(breakdown);
   }
 
+  // 7b'. ИЦП: цена производителей товара — средняя цена фирм, взвешенная по выпуску (без выпуска — по мощности).
+  //       ИЦП = 100 × Σ w·Pp / Σ w·Pp_ref; вклад товара = 100 × w × ΔPp / Σ w·Pp_ref.
+  let ppiBase = 0;
+  const ppiContributions: Breakdown = {};
+  for (const [good, m] of Object.entries(state.market)) {
+    ppiBase += m.ppiWeight * m.producerReferencePrice;
+    const producers = state.firms.filter((f) => outputOf(f) === good);
+    const byOutput = producers.reduce((s, f) => s + f.lastRuns, 0);
+    const weight = (f: Firm) => (byOutput > 0 ? f.lastRuns : f.capacity);
+    const total = producers.reduce((s, f) => s + weight(f), 0);
+    if (total <= 0) continue;
+    const before = m.producerPrice;
+    m.producerPrice = producers.reduce((s, f) => s + weight(f) * f.price, 0) / total;
+    ppiContributions[`producerPrice.${good}`] = m.ppiWeight * (m.producerPrice - before);
+  }
+  for (const ref of Object.keys(ppiContributions)) ppiContributions[ref] = ppiBase > 0 ? (100 * ppiContributions[ref]!) / ppiBase : 0;
+  const ppiEvent = makeCauseEvent(turn, 'ppi', ppiContributions);
+  causes.push(ppiEvent);
+
   // 7b. ИПЦ: 100 × Σ w·P / Σ w·P_ref. Вклад товара = 100 × w × ΔP / Σ w·P_ref.
   let base = 0;
   for (const [good, w] of Object.entries(balance.cpiWeights)) base += w * (state.market[good]?.referencePrice ?? 0);
@@ -565,6 +667,13 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
 
   // 7c. Зарплата и ожидания.
   const unemployment = unemploymentRate(employment, laborForce);
+  // Безработица u = 1 − E / L: вклад отрасли = −ΔE_отрасли / L.
+  const unemploymentContributions: Breakdown = {};
+  for (const sector of new Set([...Object.keys(employmentBySector), ...Object.keys(prev.metrics.employmentBySector)])) {
+    const delta = (employmentBySector[sector] ?? 0) - (prev.metrics.employmentBySector[sector] ?? 0);
+    unemploymentContributions[`employment.${sector}`] = laborForce > 0 ? -delta / laborForce : 0;
+  }
+  causes.push(makeCauseEvent(turn, 'unemployment', unemploymentContributions));
   const wageUpdate = nextWage(state.wage, unemployment, expected, balance.labor, turn);
   causes.push(wageUpdate.cause);
   const paidWage = state.wage;
@@ -590,10 +699,12 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
 
   state.metrics = {
     cpi,
+    ppi: prev.metrics.ppi + ppiEvent.delta,
     inflationMoM,
     inflationYoY: yearAgo !== undefined && yearAgo > 0 ? cpi / yearAgo - 1 : null,
     unemployment,
     employment,
+    employmentBySector,
     wage: paidWage,
     realWage: cpi > 0 ? (paidWage * 100) / cpi : 0,
     householdSpending,
