@@ -52,6 +52,8 @@ export function describeDecision(action: Action, state: WorldState, data: GameDa
       return t('decision.buildStorage', { building: translate(`building.${action.building}`), province: provinceName(state, action.province) });
     case 'buildStateFleet':
       return t('decision.buildStateFleet');
+    case 'buildStateFirm':
+      return t('decision.buildStateFirm', { building: translate(`building.${action.building}`), province: provinceName(state, action.province) });
     case 'reserveBuy':
     case 'reserveRelease':
       return t(action.type === 'reserveBuy' ? 'decision.reserveBuy' : 'decision.reserveRelease', {

@@ -1,0 +1,13 @@
+{
+  "extends": "baseline",
+  "reserve": {
+    "storages": [
+      { "building": "elevator", "province": "north" },
+      { "building": "elevator", "province": "south" }
+    ],
+    "stock": [
+      { "province": "north", "good": "grain", "quantity": 300 },
+      { "province": "south", "good": "grain", "quantity": 300 }
+    ]
+  }
+}

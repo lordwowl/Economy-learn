@@ -35,6 +35,7 @@ export function isAllowed(level: Level, action: Action, data: GameData): boolean
     case 'buildStateFleet':
       return level.buildings.includes(buildingOf('fleet'));
     case 'buildStorage':
+    case 'buildStateFirm':
       return level.buildings.includes(action.building);
     case 'shock':
       return false;

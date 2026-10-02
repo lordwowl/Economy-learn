@@ -1,0 +1,18 @@
+{
+  "id": "overheating",
+  "number": 9,
+  "titleKey": "level.overheating.title",
+  "briefingKey": "level.overheating.briefing",
+  "scenario": "overheating",
+  "seed": 42,
+  "turns": 24,
+  "levers": ["keyRate", "taxes", "transfers"],
+  "buildings": [],
+  "events": [],
+  "goals": [
+    { "id": "cpi", "star": 1, "condition": { "kind": "metric", "metric": "cpi", "op": "<=", "value": 106, "when": "end" } },
+    { "id": "jobs", "star": 2, "condition": { "kind": "metric", "metric": "unemployment", "op": "<=", "value": 0.1, "when": "always" } },
+    { "id": "noDeflation", "star": 3, "condition": { "kind": "metric", "metric": "cpi", "op": ">=", "value": 102, "when": "end" } }
+  ],
+  "questions": ["level.overheating.q1", "level.overheating.q2", "level.overheating.q3"]
+}

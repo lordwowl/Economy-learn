@@ -23,9 +23,11 @@ interface Props {
   onDecide: (action: Action) => void;
   /** Открытые на уровне рычаги (по умолчанию — все). */
   levers?: readonly Lever[];
+  /** Песочница: можно самому вызвать шок. */
+  shocks?: boolean;
 }
 
-export function PolicyPanel({ state, data, decisions, onDecide, levers = LEVERS }: Props) {
+export function PolicyPanel({ state, data, decisions, onDecide, levers = LEVERS, shocks = false }: Props) {
   const open = (lever: Lever) => levers.includes(lever);
   const decided = <A extends Action>(key: string) => decisions.find((d) => decisionKey(d) === key) as A | undefined;
   const g = state.government;
@@ -144,12 +146,34 @@ export function PolicyPanel({ state, data, decisions, onDecide, levers = LEVERS 
       )}
 
       {open('reserve') && <ReservePolicy state={state} data={data} onDecide={onDecide} />}
+      {shocks && (
+        <Section title={t('policy.shocks')} hint={t('policy.shocksHint')}>
+          <div class="chips">
+            {data.shocks.map((shock) => {
+              const active = state.activeShocks.some((s) => s.id === shock.id);
+              const chosen = decisions.some((d) => d.type === 'shock' && d.shock === shock.id);
+              return (
+                <button
+                  key={shock.id}
+                  type="button"
+                  class={chosen ? 'chip chip--active' : 'chip'}
+                  aria-pressed={chosen}
+                  disabled={active}
+                  onClick={() => onDecide({ type: 'shock', shock: shock.id })}
+                >
+                  {active ? t('policy.shockActive', { name: translate(shock.nameKey) }) : translate(shock.nameKey)}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+      )}
       {levers.length === 0 && <p class="section__hint">{t('policy.closed')}</p>}
     </div>
   );
 }
 
-function ReservePolicy({ state, data, onDecide }: Omit<Props, 'decisions' | 'levers'>) {
+function ReservePolicy({ state, data, onDecide }: Omit<Props, 'decisions' | 'levers' | 'shocks'>) {
   const [quantity, setQuantity] = useState(100);
   const provinces = state.provinces.filter((p) => state.reserve.storages.some((s) => s.ready && s.province === p.id));
   return (

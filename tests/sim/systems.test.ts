@@ -52,8 +52,17 @@ describe('pricing (GDD 5.4)', () => {
     const f = balance.firms;
     expect(nextMarkup(0.2, 0.5 * f.targetCoverage, f)).toBeGreaterThan(0.2);
     expect(nextMarkup(0.2, 2 * f.targetCoverage, f)).toBeLessThan(0.2);
-    expect(nextMarkup(f.markupMax, 0, f)).toBe(f.markupMax);
-    expect(nextMarkup(f.markupMin, f.coverageCap, f)).toBe(f.markupMin);
+    const noReversion = { ...f, markupReversion: 0 };
+    expect(nextMarkup(f.markupMax, 0, noReversion)).toBe(f.markupMax);
+    expect(nextMarkup(f.markupMin, f.coverageCap, noReversion)).toBe(f.markupMin);
+  });
+
+  it('без дефицита и затоваривания наценка возвращается к нормальной (конкуренция)', () => {
+    const f = balance.firms;
+    const high = f.initialMarkup + 0.2;
+    expect(nextMarkup(high, f.targetCoverage, f)).toBeCloseTo(high - f.markupReversion * 0.2, 12);
+    expect(nextMarkup(f.initialMarkup, f.targetCoverage, f)).toBeCloseTo(f.initialMarkup, 12);
+    expect(nextMarkup(f.markupMin, f.targetCoverage, f)).toBeGreaterThan(f.markupMin);
   });
 
   it('покрытие ограничено coverageCap', () => {

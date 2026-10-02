@@ -61,6 +61,8 @@ export function decisionKey(action: Action): string | undefined {
     case 'reserveBuy':
     case 'reserveRelease':
       return `${action.type}.${action.good}.${action.province}`;
+    case 'shock':
+      return `shock.${action.shock}`;
     default:
       return undefined;
   }

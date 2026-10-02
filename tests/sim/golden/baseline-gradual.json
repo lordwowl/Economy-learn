@@ -1,7 +1,7 @@
 {
  "scenario": "baseline",
  "seed": 42,
- "policy": "passive",
+ "policy": "gradual",
  "turns": 24,
  "rows": [
   {

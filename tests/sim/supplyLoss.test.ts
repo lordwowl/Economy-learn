@@ -8,6 +8,7 @@ const data = getGameData();
 const SHOCK_TURN = 3;
 const grainOut = data.recipes.find((r) => r.id === 'grain')!.output.amount;
 const harvest = data.shocks.find((s) => s.id === 'harvestFailure')!;
+const harvestCut = harvest.effects[0]!;
 const loss = (causes: ReturnType<typeof run>['causes'], turn: number, good: string) => causes[turn]!.find((c) => c.metric === `supplyLoss.${good}`);
 
 describe('недопроизводство в журнале', () => {
@@ -20,7 +21,7 @@ describe('недопроизводство в журнале', () => {
       const shock = event.causes.find((c) => c.ref === 'shock.harvestFailure')!;
       expect(shock.value).toBeGreaterThan(0);
       const farms = states[t - 1]!.firms.filter((f) => f.building === 'farm');
-      const cut = farms.reduce((s, f) => s + f.capacity, 0) * (1 - harvest.effects[0]!.multiplier) * grainOut;
+      const cut = farms.reduce((s, f) => s + f.capacity, 0) * (1 - harvestCut.multiplier) * grainOut;
       expect(shock.value).toBeLessThanOrEqual(cut + 1e-9);
     }
     for (const t of [1, 2, SHOCK_TURN + harvest.turns + 1]) {

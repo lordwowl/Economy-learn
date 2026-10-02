@@ -108,6 +108,7 @@ export function decisionRefs(action: Action, metric: string): string[] {
     case 'addRoadLane':
     case 'buildStorage':
     case 'buildStateFleet':
+    case 'buildStateFirm':
       return inBudget ? ['construction'] : [];
     case 'setKeyRate':
       return inBudget ? ['interest'] : [];
@@ -142,9 +143,15 @@ export function levelReport(level: Level, history: readonly TurnRecord[], balanc
   }
   if (metrics.length === 0) metrics.push('cpi');
   const chains: Chain[] = [];
+  /** Цепочка, все звенья которой уже есть в другой, ничего не добавляет. */
+  const covered = (links: ChainLink[]) => chains.some((c) => links.every((l) => c.links.some((x) => x.metric === l.metric)));
   for (const metric of metrics) {
     const links = causalChain(history, metric);
-    if (links.length === 0) continue;
+    if (links.length === 0 || covered(links)) continue;
+    // Новая цепочка поглощает прежние, звенья которых в ней все есть.
+    for (let i = chains.length - 1; i >= 0; i--) {
+      if (chains[i]!.links.every((l) => links.some((x) => x.metric === l.metric))) chains.splice(i, 1);
+    }
     const root = links.at(-1)!;
     chains.push({
       links,

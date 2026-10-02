@@ -10,7 +10,7 @@
 //  7. новые наценки и цены фирм; ИПЦ; зарплата; ожидания.
 
 import type { GameData } from '../data/load';
-import type { Recipe } from '../data/schemas';
+import type { ProducerBuilding, Recipe } from '../data/schemas';
 import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type CauseEvent } from './causes';
 import { schedule, spreadOverLag, takeDue } from './delay';
 import type { Rng } from './rng';
@@ -79,6 +79,20 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       }
       break;
     }
+    case 'buildStateFirm': {
+      const building = data.buildings.find((b) => b.id === action.building);
+      if (building?.kind !== 'producer') throw new Error(`"${action.building}" не производственное здание`);
+      if (!state.provinces.some((p) => p.id === action.province)) throw new Error(`нет провинции "${action.province}"`);
+      const cost = stateFirmCost(building, data.balance);
+      addSpending(state, BUDGET.construction, cost);
+      payHouseholds(state, cost, (p) => p.households.laborForce);
+      const sameTurn = state.firms.filter((f) => f.id.startsWith(`${building.id}-${action.province}-s${turn}`)).length;
+      const id = `${building.id}-${action.province}-s${turn}${sameTurn > 0 ? `-${sameTurn + 1}` : ''}`;
+      const recipe = data.recipes.find((r) => r.id === building.recipe)!;
+      state.firms.push({ ...newFirm(state, building, recipe, id, action.province, 0, data.balance), owner: 'state' });
+      state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'firmReady', firm: id, capacity: building.capacity });
+      break;
+    }
     case 'buildStorage': {
       const building = data.buildings.find((b) => b.id === action.building);
       if (building?.kind !== 'storage') throw new Error(`"${action.building}" не склад`);
@@ -121,6 +135,38 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       break;
     }
   }
+}
+
+/** Цена госпредприятия: здание, которое обычно строит частный бизнес, государству обходится дороже (GDD 3). */
+export function stateFirmCost(building: ProducerBuilding, balance: GameData['balance']): number {
+  return building.owner === 'state' ? building.cost : building.cost * balance.government.stateFirmCostMultiplier;
+}
+
+/** Фирма на стройке: цена и её разложение — как у такой же фирмы (в провинции, иначе любой) или рынка провинции; мощность — после firmReady. */
+function newFirm(state: WorldState, building: ProducerBuilding, recipe: Recipe, id: string, province: string, debt: number, balance: GameData['balance']): Firm {
+  const template = state.firms.find((f) => f.recipe === recipe.id && f.province === province) ?? state.firms.find((f) => f.recipe === recipe.id);
+  const market = state.market[recipe.output.good]!;
+  const local = market.provinces[province] ?? market;
+  return {
+    id,
+    building: building.id,
+    recipe: recipe.id,
+    owner: building.owner,
+    province,
+    capacity: 0,
+    inventory: {},
+    cash: 0,
+    debt,
+    underConstruction: true,
+    price: template?.price ?? local.price,
+    breakdown: { ...(template?.breakdown ?? local.breakdown) },
+    markup: balance.firms.initialMarkup,
+    ordersHistory: [],
+    lastRuns: 0,
+    lastSales: 0,
+    lastProfit: 0,
+    lossTurns: 0,
+  };
 }
 
 /** Средняя по стране цена: провинции взвешены по населению. */
@@ -180,8 +226,14 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     if (effect.type === 'firmReady') {
       const firm = state.firms.find((f) => f.id === effect.firm);
       if (firm) {
+        // Новая фирма рассчитывает на долю заказов рынка по своей мощности: без запаса ей не достаётся продаж,
+        // и без ожиданий она не начала бы производить (GDD 5.8).
+        const peers = state.firms.filter((f) => f !== firm && f.recipe === firm.recipe && !f.underConstruction && f.capacity > 0);
+        const peerCapacity = peers.reduce((sum, f) => sum + f.capacity, 0);
+        const ordersPerCapacity = peerCapacity > 0 ? peers.reduce((sum, f) => sum + mean(f.ordersHistory), 0) / peerCapacity : 0;
         firm.capacity = effect.capacity;
         firm.underConstruction = false;
+        if (ordersPerCapacity > 0) firm.ordersHistory = [ordersPerCapacity * firm.capacity];
       }
     }
   }
@@ -598,28 +650,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       if (utilization < balance.credit.entryMinUtilization) continue;
       const roi = entryRoi(building, recipe, pm.price, localPrices(province.id), state.wage, state.government.taxes.sales);
       if (roi <= loanRate(state, balance.credit) + balance.credit.expansionRoiMargin) continue;
-      const template = producers.find((f) => f.province === province.id) ?? producers[0];
       const id = `${building.id}-${province.id}-t${turn}`;
-      state.firms.push({
-        id,
-        building: building.id,
-        recipe: recipe.id,
-        owner: building.owner,
-        province: province.id,
-        capacity: 0,
-        inventory: {},
-        cash: 0,
-        debt: building.cost,
-        underConstruction: true,
-        price: template?.price ?? pm.price,
-        breakdown: { ...(template?.breakdown ?? pm.breakdown) },
-        markup: balance.firms.initialMarkup,
-        ordersHistory: [],
-        lastRuns: 0,
-        lastSales: 0,
-        lastProfit: 0,
-        lossTurns: 0,
-      });
+      state.firms.push(newFirm(state, building, recipe, id, province.id, building.cost, balance));
       // Стройка в кредит: деньги банка уходят строителям — населению.
       payHouseholds(state, building.cost, (p) => p.households.laborForce);
       state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'firmReady', firm: id, capacity: building.capacity });

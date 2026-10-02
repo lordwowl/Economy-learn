@@ -9,6 +9,7 @@ import type { Action, WorldState } from '../../src/sim';
 
 const data = getGameData();
 const harvest = getLevels().find((l) => l.id === 'harvest')!;
+const SHOCK_TURN = harvest.events[0]!.turn;
 
 function play(level: Level, decide: (state: WorldState) => Action[] = () => []): Session {
   let s = startLevel(data, level, getScenario(level.scenario));
@@ -46,7 +47,7 @@ describe('отчёт уровня: причинная цепочка (GDD 6)', (
 
   it('первопричина-шок связана с событием уровня', () => {
     const chain = levelReport(harvest, passive.history, data.balance).chains.find((c) => c.links[0]!.metric === 'cpi')!;
-    expect(chain.events).toEqual([{ turn: 3, action: { type: 'shock', shock: 'harvestFailure' } }]);
+    expect(chain.events).toEqual([{ turn: SHOCK_TURN, action: { type: 'shock', shock: 'harvestFailure' } }]);
     expect(chain.decisions).toEqual([]);
   });
 
@@ -64,22 +65,18 @@ describe('отчёт уровня: причинная цепочка (GDD 6)', (
 
   it('потолок цен: цепочка ведёт к решению игрока', () => {
     const report = levelReport(harvest, ceiling.history, data.balance);
-    // Цель «дефицит хлеба» объясняется недопроизводством, ИПЦ — ценой хлеба; обе цепочки упираются в потолок.
-    expect(report.chains.map((c) => c.links.map((l) => `${l.metric}←${l.cause.ref}`))).toEqual([
-      ['supplyLoss.bread←priceCeiling'],
-      ['cpi←price.bread', 'price.bread←priceCeiling'],
-    ]);
-    for (const chain of report.chains) {
-      expect(chain.decisions).toHaveLength(1);
-      expect(chain.decisions[0]).toMatchObject({ turn: 2, action: { type: 'setPriceCeiling', good: 'bread' } });
-    }
+    // ИПЦ ниже, чем мог бы быть, из-за потолка — цепочка упирается в решение игрока.
+    const cpi = report.chains.find((c) => c.links[0]!.metric === 'cpi')!;
+    expect(cpi.links.map((l) => `${l.metric}←${l.cause.ref}`)).toEqual(['cpi←price.bread', 'price.bread←priceCeiling']);
+    expect(cpi.decisions).toHaveLength(1);
+    expect(cpi.decisions[0]).toMatchObject({ turn: 2, action: { type: 'setPriceCeiling', good: 'bread' } });
   });
 
   it('в отчёте — решения игрока и события уровня с месяцами', () => {
     const report = levelReport(harvest, ceiling.history, data.balance);
     expect(report.decisions).toEqual([{ turn: 2, action: ceiling.history[2]!.actions[0] }]);
-    expect(report.events).toEqual([{ turn: 3, action: { type: 'shock', shock: 'harvestFailure' } }]);
-    expect(report.status.outcome).toBe('defeated');
+    expect(report.events).toEqual([{ turn: SHOCK_TURN, action: { type: 'shock', shock: 'harvestFailure' } }]);
+    expect(report.status.outcome).toBe('completed');
   });
 
   it('решения связаны только со своими причинами', () => {

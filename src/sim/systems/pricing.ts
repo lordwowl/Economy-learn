@@ -53,9 +53,15 @@ export function unitCostBreakdown(recipe: Recipe, inputs: Record<GoodId, InputPr
   return cost;
 }
 
-/** m(t+1) = clamp(m + β × (cov_target − cov) / cov_target, m_min, m_max). */
+/**
+ * m(t+1) = clamp(m + β × (cov_target − cov) / cov_target − ρ × (m − m_норм), m_min, m_max).
+ * ρ — конкуренция: без дефицита и затоваривания наценка возвращается к нормальной (initialMarkup).
+ */
 export function nextMarkup(markup: number, cov: number, firms: Balance['firms']): number {
-  const adjusted = markup + (firms.markupAdjustSpeed * (firms.targetCoverage - cov)) / firms.targetCoverage;
+  const adjusted =
+    markup +
+    (firms.markupAdjustSpeed * (firms.targetCoverage - cov)) / firms.targetCoverage -
+    firms.markupReversion * (markup - firms.initialMarkup);
   return clamp(adjusted, firms.markupMin, firms.markupMax);
 }
 

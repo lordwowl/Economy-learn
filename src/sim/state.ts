@@ -275,6 +275,8 @@ export type Action =
   | { type: 'shock'; shock: string }
   /** +1 единица госпарка (из бюджета, через buildTurns). */
   | { type: 'buildStateFleet' }
+  /** Госпредприятие (GDD 3): производственное здание в собственности государства, из бюджета, через buildTurns. */
+  | { type: 'buildStateFirm'; building: string; province: string }
   /** Закупка в резерв на рынке провинции в этом ходу. */
   | { type: 'reserveBuy'; good: GoodId; province: string; quantity: number }
   /** Интервенция: продажа из резерва на рынке провинции в этом ходу. */

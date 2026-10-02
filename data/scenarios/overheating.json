@@ -1,0 +1,5 @@
+{
+  "extends": "baseline",
+  "startKeyRate": 0.02,
+  "expectedInflation": 0.08
+}

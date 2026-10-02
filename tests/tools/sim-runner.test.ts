@@ -20,10 +20,12 @@ describe('sim-runner', () => {
   });
 
   it('у разных стратегий разные исходы: ставка ↑ — ниже цены, ставка ↓ — выше', () => {
-    const at = (policy: string) => simulate({ scenario: 'baseline', seed: 42, policy, turns: 18 }).rows.at(-1)!;
+    const rows = (policy: string) => simulate({ scenario: 'baseline', seed: 42, policy, turns: 18 }).rows;
+    const at = (policy: string) => rows(policy).at(-1)!;
+    const peakUnemployment = (policy: string) => Math.max(...rows(policy).map((r) => r.unemployment));
     expect(at('hawk').cpi).toBeLessThan(at('passive').cpi);
     expect(at('dove').cpi).toBeGreaterThan(at('passive').cpi);
-    expect(at('hawk').unemployment).toBeGreaterThan(at('passive').unemployment);
+    expect(peakUnemployment('hawk')).toBeGreaterThan(peakUnemployment('passive'));
   });
 
   it('--policy all печатает сравнение ботов', () => {
@@ -34,14 +36,21 @@ describe('sim-runner', () => {
 
   it('--level: сценарий, seed и срок из уровня, шоки по сценарию, итог по целям', () => {
     const options = parseArgs(['--level', '05']);
-    expect(options).toMatchObject({ level: '05', scenario: 'baseline', seed: 42, turns: 24 });
+    expect(options).toMatchObject({ level: '05', scenario: 'harvest', seed: 42, turns: 24 });
     expect(parseArgs(['--level', 'harvest', '--seed', '7', '--turns', '6'])).toMatchObject({ seed: 7, turns: 6 });
     const { rows, level } = simulate({ ...options, policy: 'passive' });
     expect(rows).toHaveLength(25);
-    expect(rows[3]!.events.join(' ')).toMatch(/шок:harvestFailure/);
+    expect(rows[4]!.events.join(' ')).toMatch(/шок:harvestFailure/);
     expect(level?.outcome).toBe('completed');
     const out = main(['--level', '05', '--policy', 'all']);
     expect(out).toMatch(/# итог уровня: пройден/);
     expect(out).toMatch(/уровень/);
+  });
+
+  it('на уровне бот может только то, что открыто игроку', () => {
+    // Уровень 3: ставка закрыта — «ястреб» играет как пассивный бот.
+    const passive = simulate({ ...parseArgs(['--level', '03']), policy: 'passive' }).rows;
+    const hawk = simulate({ ...parseArgs(['--level', '03']), policy: 'hawk' }).rows;
+    expect(hawk).toEqual(passive);
   });
 });

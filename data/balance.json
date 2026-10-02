@@ -3,11 +3,12 @@
     "targetCoverage": 1.0,
     "salesAverageTurns": 3,
     "coverageCap": 3.0,
-    "inventoryAdjustSpeed": 0.3,
+    "inventoryAdjustSpeed": 0.2,
     "initialMarkup": 0.2,
     "markupMin": 0.05,
     "markupMax": 0.6,
-    "markupAdjustSpeed": 0.1,
+    "markupAdjustSpeed": 0.05,
+    "markupReversion": 0.2,
     "priceStickiness": 0.4,
     "expectedInflationPassThrough": 0.5,
     "lossOutputCut": 3.0,
@@ -17,7 +18,7 @@
   },
   "demand": {
     "baseSpendingShare": 0.8,
-    "rateSensitivity": 1.0,
+    "rateSensitivity": 0.5,
     "neutralRate": 0.06,
     "goods": {
       "bread": {
@@ -54,7 +55,7 @@
     "entryMinUtilization": 0.9,
     "entryMinMarkup": 0.15,
     "householdTargetDebtToMonthlyIncome": 2,
-    "householdDebtRateSensitivity": 10,
+    "householdDebtRateSensitivity": 5,
     "householdDebtAdjustSpeed": 0.1
   },
   "expectations": {
@@ -119,6 +120,7 @@
     "minTrust": 0
   },
   "government": {
-    "debtRatePremium": 0.5
+    "debtRatePremium": 0.5,
+    "stateFirmCostMultiplier": 1.5
   }
 }

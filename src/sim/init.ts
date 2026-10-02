@@ -10,18 +10,8 @@ import { emptyQueue } from './delay';
 import type { Carrier, Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, RouteMetrics, WorldState } from './state';
 import { householdTargetDebt } from './systems/credit';
 import { spendingShare } from './systems/demand';
-import {
-  laborPerUnit,
-  legKey,
-  planShipments,
-  routeCapacity,
-  shortestPaths,
-  tariff,
-  type GoodBalance,
-  type Path,
-  type Shipment,
-} from './systems/logistics';
-import { COMPONENT, unitCostBreakdown, type InputPrice } from './systems/pricing';
+import { laborPerUnit, legKey, planShipments, routeCapacity, shortestPaths, tariff, type GoodBalance, type Path, type Shipment } from './systems/logistics';
+import { COMPONENT, unitCostBreakdown, withCeiling, type InputPrice } from './systems/pricing';
 import { costPerRun } from './systems/production';
 import { annualToMonthly } from './units';
 
@@ -199,13 +189,9 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const workPerUnit = fleetBuilding?.kind === 'fleet' ? fleetBuilding.workCapacity : 0;
   const stateWork = Math.min(plan.work, scenario.fleet.state * workPerUnit);
   const privateWork = plan.work - stateWork;
-  const privateFleet =
-    scenario.fleet.private === 'auto'
-      ? Math.ceil(privateWork / (workPerUnit * balance.credit.entryMinUtilization))
-      : scenario.fleet.private;
+  const privateFleet = scenario.fleet.private === 'auto' ? Math.ceil(privateWork / (workPerUnit * balance.credit.entryMinUtilization)) : scenario.fleet.private;
   const stateShare = plan.work > 0 ? stateWork / plan.work : 0;
-  const tariffOf = (path: Path) =>
-    stateShare * tariff(path, fuelPrice, wage, cfg, 0) + (1 - stateShare) * tariff(path, fuelPrice, wage, cfg, cfg.markup);
+  const tariffOf = (path: Path) => stateShare * tariff(path, fuelPrice, wage, cfg, 0) + (1 - stateShare) * tariff(path, fuelPrice, wage, cfg, cfg.markup);
   for (const good of order) {
     const recipe = recipeByGood.get(good)!;
     producerPrice[good] = {};
@@ -347,10 +333,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   };
 
   const logistics: Logistics = {
-    carriers: [
-      carrier('state', 0, stateWork, scenario.fleet.state),
-      carrier('private', cfg.markup, privateWork, privateFleet),
-    ],
+    carriers: [carrier('state', 0, stateWork, scenario.fleet.state), carrier('private', cfg.markup, privateWork, privateFleet)],
     requested: plan.requested,
   };
 
@@ -363,8 +346,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   const laborShare = laborDemand > 0 ? employment / laborDemand : 0;
   const employmentBySector: Record<string, number> = { logistics: plan.logisticsLabor * laborShare };
   for (const firm of firms) {
-    employmentBySector[firm.building] =
-      (employmentBySector[firm.building] ?? 0) + (plan.runs.get(firm.id) ?? 0) * recipeFor(firm).labor * laborShare;
+    employmentBySector[firm.building] = (employmentBySector[firm.building] ?? 0) + (plan.runs.get(firm.id) ?? 0) * recipeFor(firm).labor * laborShare;
   }
   revenue += employment * wage * scenario.taxes.income;
   const transfersPerCapita = scenario.transfersPerCapita === 'balanced' ? revenue / population : scenario.transfersPerCapita;
@@ -401,6 +383,20 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   }
 
   const monthlyTarget = annualToMonthly(balance.expectations.inflationTarget);
+  const monthlyExpected = scenario.expectedInflation !== undefined ? annualToMonthly(scenario.expectedInflation) : monthlyTarget;
+  const startRate = scenario.startKeyRate ?? scenario.keyRate;
+  // Потолки на старте: доля стартовой цены производителей, срез — в разложении цен фирм (GDD 5.6).
+  const priceCeilings: Record<GoodId, number> = {};
+  for (const [good, share] of Object.entries(scenario.priceCeilings ?? {})) {
+    const m = market[good];
+    if (!m) continue;
+    priceCeilings[good] = share * m.producerPrice;
+    for (const firm of firms) {
+      if (recipeFor(firm).output.good !== good) continue;
+      firm.breakdown = withCeiling(firm.breakdown, priceCeilings[good]);
+      firm.price = Object.values(firm.breakdown).reduce((a, b) => a + b, 0);
+    }
+  }
   const zeroByGood = () => Object.fromEntries(order.map((g) => [g, 0]));
   let spending = 0;
   for (const p of provinces) spending += p.households.referenceSpendingPerCapita * p.households.population;
@@ -435,9 +431,9 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
   return {
     turn: 0,
     wage,
-    keyRate: scenario.keyRate,
-    demandRate: scenario.keyRate,
-    creditRate: scenario.keyRate,
+    keyRate: startRate,
+    demandRate: startRate,
+    creditRate: startRate,
     provinces,
     routes,
     logistics,
@@ -450,21 +446,26 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       transfersPerCapita,
       subsidies: {},
       announcedSubsidies: {},
-      priceCeilings: {},
+      priceCeilings,
       revenue: {},
       spending: {},
     },
     bank: { cash: 0, writtenOff: 0 },
     activeShocks: [],
     reserve: {
-      storages: scenario.reserve.storages.map((s, i) => ({ id: `${s.building}-${s.province}-${i + 1}`, building: s.building, province: s.province, ready: true })),
+      storages: scenario.reserve.storages.map((s, i) => ({
+        id: `${s.building}-${s.province}-${i + 1}`,
+        building: s.building,
+        province: s.province,
+        ready: true,
+      })),
       stock: scenario.reserve.stock.reduce<Record<string, Record<GoodId, number>>>((acc, item) => {
         const byGood = (acc[item.province] ??= {});
         byGood[item.good] = (byGood[item.good] ?? 0) + item.quantity;
         return acc;
       }, {}),
     },
-    expectations: { adaptive: monthlyTarget, expected: monthlyTarget, trust: scenario.trust },
+    expectations: { adaptive: monthlyExpected, expected: monthlyExpected, trust: scenario.trust },
     pending: emptyQueue(),
     cpiHistory: [100],
     metrics,
