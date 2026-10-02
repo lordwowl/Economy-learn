@@ -444,7 +444,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) capacityByGood[outputOf(firm)] = (capacityByGood[outputOf(firm)] ?? 0) + firm.capacity;
   for (const firm of state.firms) {
     const good = outputOf(firm);
-    const unmetShare = ((trade.unmetByGood[good] ?? 0) * firm.capacity) / (capacityByGood[good] ?? 1);
+    const totalCapacity = capacityByGood[good] ?? 0;
+    const unmetShare = totalCapacity > 0 ? ((trade.unmetByGood[good] ?? 0) * firm.capacity) / totalCapacity : 0;
     const sold = trade.soldByFirm.get(firm.id) ?? 0;
     firm.lastSales = sold;
     firm.ordersHistory = [...firm.ordersHistory, sold + unmetShare].slice(-balance.firms.salesAverageTurns);

@@ -1,6 +1,7 @@
 import scenarioRaw from '../../data/scenarios/baseline.json';
 import { getGameData, loadScenario, type GameData, type Scenario } from '../../src/data';
 import { createInitialState, Rng, step, type Action, type CauseEvent, type WorldState } from '../../src/sim';
+import type { Policy } from '../../tools/policies';
 
 export const SEED = 42;
 
@@ -29,6 +30,20 @@ export function run(
   const causes: CauseEvent[][] = [[]];
   for (let t = 1; t <= turns; t++) {
     const result = step(states[t - 1]!, actionsAt(t), rng, data);
+    states.push(result.state);
+    causes.push(result.causes);
+  }
+  return { states, causes };
+}
+
+/** Прогон с ботом-политикой: решения зависят от состояния перед ходом. */
+export function runPolicy(turns: number, policy: Policy, data: GameData = getGameData(), patch?: ScenarioPatch): Run {
+  const rng = new Rng(SEED);
+  const states = [baseline(data, patch)];
+  const causes: CauseEvent[][] = [[]];
+  for (let t = 1; t <= turns; t++) {
+    const prev = states[t - 1]!;
+    const result = step(prev, policy(prev, t, data), rng, data);
     states.push(result.state);
     causes.push(result.causes);
   }
