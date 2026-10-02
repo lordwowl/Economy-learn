@@ -86,6 +86,10 @@ function checkReferences(data: GameData, issues: string[]): void {
   }
 
   for (const good of Object.keys(data.balance.demand.goods)) needGood('balance.json: demand.goods', good);
+  needGood('balance.json: logistics.fuelGood', data.balance.logistics.fuelGood);
+  if (data.buildings.filter((b) => b.kind === 'route').length !== 1) {
+    issues.push('buildings.json: нужно ровно одно здание вида route (полоса дороги)');
+  }
   for (const good of Object.keys(data.balance.cpiWeights)) {
     needGood('balance.json: cpiWeights', good);
     if (!(good in data.balance.demand.goods)) {
@@ -132,6 +136,17 @@ export function loadScenario(raw: unknown, data: GameData, file = 'scenario'): S
   for (const firm of scenario.firms) {
     if (!producers.has(firm.building)) issues.push(`${file}: "${firm.building}" не производственное здание`);
     if (!provinceIds.has(firm.province)) issues.push(`${file}: неизвестная провинция "${firm.province}"`);
+  }
+  checkUniqueIds(file, scenario.routes, issues);
+  const pairs = new Set<string>();
+  for (const route of scenario.routes) {
+    for (const end of [route.a, route.b]) {
+      if (!provinceIds.has(end)) issues.push(`${file}: дорога ${route.id}: неизвестная провинция "${end}"`);
+    }
+    if (route.a === route.b) issues.push(`${file}: дорога ${route.id} ведёт в ту же провинцию`);
+    const pair = [route.a, route.b].sort().join('|');
+    if (pairs.has(pair)) issues.push(`${file}: дорога ${route.id} дублирует другую дорогу между теми же провинциями`);
+    pairs.add(pair);
   }
   if (issues.length > 0) throw new GameDataError(issues);
   return scenario;

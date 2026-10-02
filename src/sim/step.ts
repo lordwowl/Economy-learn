@@ -1,26 +1,27 @@
 // Один ход (= месяц) симуляции. Чистая функция: входное состояние не меняется.
 //
-// Порядок хода:
+// Порядок хода (GDD 5.16):
 //  1. решения игрока и созревшие отложенные эффекты;
 //  2. планы фирм (заказы, покрытие, деньги), урезка по доступному труду;
-//  3. рынок входов: фирмы докупают сырьё у звеньев выше по цепочке;
+//  3. перевозчик докупает топливо; рынок входов: фирмы докупают сырьё (местное, затем привозное);
 //  4. производство и выплата зарплат;
-//  5. потребительский рынок;
-//  6. заказы, средние цены рынка, прибыль и дивиденды;
+//  5. потребительский рынок (местное, затем привозное);
+//  6. заказы, цены рынков провинций и страны, прибыль и дивиденды;
 //  7. новые наценки и цены фирм; ИПЦ; зарплата; ожидания.
 
 import type { GameData } from '../data/load';
 import type { Recipe } from '../data/schemas';
 import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type CauseEvent } from './causes';
 import { schedule, spreadOverLag, takeDue } from './delay';
-import { clearMarket, type Bid, type ClearingResult, type Offer } from './market';
 import type { Rng } from './rng';
-import type { Action, Firm, GoodId, WorldState } from './state';
+import type { Action, Firm, GoodId, Province, RouteMetrics, WorldState } from './state';
+import { planHouseholdPurchases } from './systems/demand';
 import { nextExpectations } from './systems/expectations';
 import { laborScale, nextWage, unemploymentRate } from './systems/labor';
-import { planHouseholdPurchases } from './systems/demand';
-import { affordableRuns, costPerRun, coverage, feasibleRuns, plannedRuns } from './systems/production';
+import { routeCapacity } from './systems/logistics';
 import { nextMarkup, nextPriceBreakdown, unitCostBreakdown } from './systems/pricing';
+import { affordableRuns, costPerRun, coverage, feasibleRuns, plannedRuns } from './systems/production';
+import { Trade, type TradeBid } from './trade';
 import { mean } from './units';
 
 export interface StepResult {
@@ -41,19 +42,41 @@ function applyAction(state: WorldState, action: Action, turn: number, data: Game
       }
       break;
     }
+    case 'addRoadLane': {
+      if (!state.routes.some((r) => r.id === action.route)) throw new Error(`нет дороги "${action.route}"`);
+      const lane = data.buildings.find((b) => b.kind === 'route')!;
+      state.pending = schedule(state.pending, turn + lane.buildTurns, { type: 'roadLane', route: action.route });
+      break;
+    }
   }
 }
 
 /** Распределяет сумму между домохозяйствами провинций пропорционально весу. */
-function payHouseholds(state: WorldState, amount: number, weight: (p: WorldState['provinces'][number]) => number): void {
+function payHouseholds(state: WorldState, amount: number, weight: (p: Province) => number): void {
   let total = 0;
   for (const p of state.provinces) total += weight(p);
   if (total <= 0 || amount === 0) return;
   for (const p of state.provinces) p.households.cash += (amount * weight(p)) / total;
 }
 
+/** Средняя по стране цена: провинции взвешены по населению. */
+function nationalAverage(state: WorldState, good: GoodId): { price: number; breakdown: Breakdown } {
+  const market = state.market[good]!;
+  let weight = 0;
+  const breakdown: Breakdown = {};
+  for (const p of state.provinces) {
+    const pm = market.provinces[p.id];
+    if (!pm) continue;
+    const w = p.households.population;
+    weight += w;
+    for (const [ref, v] of Object.entries(pm.breakdown)) breakdown[ref] = (breakdown[ref] ?? 0) + w * v;
+  }
+  for (const ref of Object.keys(breakdown)) breakdown[ref] = breakdown[ref]! / weight;
+  return { price: sumBreakdown(breakdown), breakdown };
+}
+
 export function step(prev: WorldState, actions: readonly Action[], rng: Rng, data: GameData): StepResult {
-  void rng; // В M3 случайных событий нет; шоки появятся вместе с уровнями.
+  void rng; // Случайных событий пока нет; шоки появятся вместе с уровнями.
   const state = structuredClone(prev);
   const turn = prev.turn + 1;
   const { balance } = data;
@@ -68,15 +91,20 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   state.pending = queue;
   for (const effect of due) {
     if (effect.type === 'demandRate') state.demandRate += effect.delta;
+    if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
   }
 
-  const prices: Record<GoodId, number> = {};
-  for (const [good, m] of Object.entries(state.market)) prices[good] = m.price;
+  const localPrices = (province: string): Record<GoodId, number> => {
+    const prices: Record<GoodId, number> = {};
+    for (const [good, m] of Object.entries(state.market)) prices[good] = m.provinces[province]?.price ?? m.price;
+    return prices;
+  };
 
   // 2. Планы.
   const plan = new Map<string, number>();
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
+    const prices = localPrices(firm.province);
     plan.set(firm.id, Math.min(plannedRuns(firm, recipe, balance.firms), affordableRuns(firm, recipe, prices, state.wage)));
   }
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
@@ -84,38 +112,20 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   for (const firm of state.firms) laborRequired += (plan.get(firm.id) ?? 0) * recipeOf(firm).labor;
   const scale = laborScale(laborRequired, laborForce);
   for (const [id, runs] of plan) plan.set(id, runs * scale);
+  laborRequired *= scale;
+
+  // 3. Топливо перевозчика и рынок входов.
+  const trade = new Trade(state, data, recipeOf, laborForce - laborRequired);
+  const logisticsCfg = balance.logistics;
+  const expectedWork = mean(state.logistics.workHistory);
+  const fuelTarget = expectedWork * logisticsCfg.fuelPerUnitLength * (1 + balance.firms.targetCoverage);
+  trade.buyLogisticsFuel(Math.max(0, fuelTarget - state.logistics.fuel));
 
   const firmById = new Map(state.firms.map((f) => [f.id, f]));
-  const soldByFirm = new Map<string, number>();
-  const revenue = new Map<string, number>();
-  const spent = new Map<string, number>();
-  const unmetByGood: Record<GoodId, number> = {};
-  const sales: { good: GoodId; result: ClearingResult }[] = [];
-  const add = (map: Map<string, number>, key: string, value: number) => map.set(key, (map.get(key) ?? 0) + value);
-
-  const offersFor = (good: GoodId): Offer[] =>
-    state.firms
-      .filter((f) => outputOf(f) === good)
-      .map((f) => ({ seller: f.id, price: f.price, quantity: f.inventory[good] ?? 0 }));
-
-  const settle = (good: GoodId, result: ClearingResult) => {
-    for (const [seller, q] of result.sold) {
-      if (q <= 0) continue;
-      const firm = firmById.get(seller)!;
-      firm.inventory[good] = (firm.inventory[good] ?? 0) - q;
-      firm.cash += q * firm.price;
-      add(soldByFirm, seller, q);
-      add(revenue, seller, q * firm.price);
-    }
-    unmetByGood[good] = (unmetByGood[good] ?? 0) + result.unmetBySupply;
-    sales.push({ good, result });
-  };
-
-  // 3. Рынок входов.
-  const inputGoods = [...new Set(data.recipes.flatMap((r) => r.inputs.map((i) => i.good)))].filter((g) => g in state.market);
-  const inputBids = new Map<GoodId, Bid[]>();
+  const inputBids = new Map<GoodId, TradeBid[]>();
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
+    const prices = localPrices(firm.province);
     const runs = plan.get(firm.id) ?? 0;
     const needs = recipe.inputs.map((input) => ({
       good: input.good,
@@ -127,27 +137,25 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
       if (n.quantity <= 0) continue;
       const share = needsValue > 0 ? (n.quantity * (prices[n.good] ?? 0)) / needsValue : 0;
       const bids = inputBids.get(n.good) ?? [];
-      bids.push({ buyer: firm.id, quantity: n.quantity, budget: budget * share });
+      bids.push({ buyer: firm.id, province: firm.province, quantity: n.quantity, budget: budget * share });
       inputBids.set(n.good, bids);
     }
   }
-  for (const good of inputGoods) {
-    const bids = inputBids.get(good) ?? [];
-    if (bids.length === 0) continue;
-    const result = clearMarket(offersFor(good), bids);
-    settle(good, result);
-    for (const [buyer, q] of result.bought) {
-      const firm = firmById.get(buyer)!;
-      firm.inventory[good] = (firm.inventory[good] ?? 0) + q;
-      const paid = result.paid.get(buyer) ?? 0;
+  const inputOutcomes = trade.tradePhase('inputs', inputBids);
+  for (const [good, bids] of inputBids) {
+    const result = inputOutcomes.get(good)!;
+    for (const bid of bids) {
+      const firm = firmById.get(bid.buyer)!;
+      firm.inventory[good] = (firm.inventory[good] ?? 0) + (result.bought.get(bid.buyer) ?? 0);
+      const paid = result.paid.get(bid.buyer) ?? 0;
       firm.cash -= paid;
-      add(spent, buyer, paid);
+      trade.spent.set(firm.id, (trade.spent.get(firm.id) ?? 0) + paid);
     }
   }
 
   // 4. Производство.
   const output: Record<GoodId, number> = {};
-  let employment = 0;
+  let productionLabor = 0;
   let wageBill = 0;
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
@@ -160,104 +168,132 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     output[recipe.output.good] = (output[recipe.output.good] ?? 0) + produced;
     const wages = runs * recipe.labor * state.wage;
     firm.cash -= wages;
-    add(spent, firm.id, wages);
+    trade.spent.set(firm.id, (trade.spent.get(firm.id) ?? 0) + wages);
     firm.lastRuns = runs;
-    employment += runs * recipe.labor;
+    productionLabor += runs * recipe.labor;
     wageBill += wages;
   }
+  // Труд, зарезервированный под планы, но не использованный, освобождается для перевозок.
+  trade.laborLeft = laborForce - productionLabor - trade.logisticsLabor;
   payHouseholds(state, wageBill, (p) => p.households.laborForce);
 
   // 5. Потребительский рынок.
-  const householdDemand: Record<GoodId, number> = {};
-  const householdPurchases: Record<GoodId, number> = {};
-  const shortage: Record<GoodId, number> = {};
-  const consumerBids = new Map<GoodId, Bid[]>();
+  const consumerBids = new Map<GoodId, TradeBid[]>();
   for (const province of state.provinces) {
-    const hp = planHouseholdPurchases(
-      province.households,
-      state.demandRate,
-      state.market,
-      state.referenceSpendingPerCapita,
-      balance.demand,
-    );
+    const markets: Record<GoodId, { price: number; referencePrice: number; breakdown: Breakdown }> = {};
+    for (const [good, m] of Object.entries(state.market)) {
+      const pm = m.provinces[province.id];
+      if (pm) markets[good] = pm;
+    }
+    const hp = planHouseholdPurchases(province.households, state.demandRate, markets, balance.demand);
     for (const [good, q] of Object.entries(hp.quantities)) {
       const bids = consumerBids.get(good) ?? [];
-      bids.push({ buyer: householdId(province.id), quantity: q, budget: q * (prices[good] ?? 0) });
+      bids.push({ buyer: householdId(province.id), province: province.id, quantity: q, budget: q * (markets[good]?.price ?? 0) });
       consumerBids.set(good, bids);
     }
   }
   let householdSpending = 0;
+  const householdDemand: Record<GoodId, number> = {};
+  const householdPurchases: Record<GoodId, number> = {};
+  const shortage: Record<GoodId, number> = {};
+  const provinceShortage: Record<string, Record<GoodId, number>> = {};
+  for (const p of state.provinces) provinceShortage[p.id] = {};
+  const consumerOutcomes = trade.tradePhase('consumer', consumerBids);
   for (const good of Object.keys(balance.demand.goods)) {
-    const bids = consumerBids.get(good) ?? [];
-    const result = clearMarket(offersFor(good), bids);
-    settle(good, result);
+    const result = consumerOutcomes.get(good);
+    if (!result) continue;
+    let demanded = 0;
+    let unmet = 0;
+    let purchased = 0;
     for (const province of state.provinces) {
-      const paid = result.paid.get(householdId(province.id)) ?? 0;
+      const id = householdId(province.id);
+      const paid = result.paid.get(id) ?? 0;
       province.households.cash -= paid;
       householdSpending += paid;
+      purchased += result.bought.get(id) ?? 0;
+      const d = result.demandedByProvince[province.id] ?? 0;
+      const u = result.unmetByProvince[province.id] ?? 0;
+      demanded += d;
+      unmet += u;
+      provinceShortage[province.id]![good] = d > 0 ? u / d : 0;
     }
-    householdDemand[good] = result.demanded;
-    householdPurchases[good] = result.quantity;
-    shortage[good] = result.demanded > 0 ? result.unmetBySupply / result.demanded : 0;
+    householdDemand[good] = demanded;
+    householdPurchases[good] = purchased;
+    shortage[good] = demanded > 0 ? unmet / demanded : 0;
   }
+  payHouseholds(state, trade.logisticsWages, (p) => p.households.laborForce);
+  const employment = productionLabor + trade.logisticsLabor;
 
   // 6a. Заказы: продажи + неудовлетворённый спрос, разнесённый по производителям пропорционально мощности.
   const capacityByGood: Record<GoodId, number> = {};
   for (const firm of state.firms) capacityByGood[outputOf(firm)] = (capacityByGood[outputOf(firm)] ?? 0) + firm.capacity;
   for (const firm of state.firms) {
     const good = outputOf(firm);
-    const unmetShare = ((unmetByGood[good] ?? 0) * firm.capacity) / (capacityByGood[good] ?? 1);
-    const sold = soldByFirm.get(firm.id) ?? 0;
+    const unmetShare = ((trade.unmetByGood[good] ?? 0) * firm.capacity) / (capacityByGood[good] ?? 1);
+    const sold = trade.soldByFirm.get(firm.id) ?? 0;
     firm.lastSales = sold;
     firm.ordersHistory = [...firm.ordersHistory, sold + unmetShare].slice(-balance.firms.salesAverageTurns);
   }
+  state.logistics.workHistory = [...state.logistics.workHistory, trade.requestedWork].slice(-balance.firms.salesAverageTurns);
+  state.logistics.lastWork = trade.work;
+  state.logistics.lastLabor = trade.logisticsLabor;
+  state.logistics.requested = trade.requested;
 
-  // 6b. Средние цены сделок и их разложение (по ценам, по которым продавали в этом ходу).
-  const soldValue: Record<GoodId, { quantity: number; breakdown: Breakdown }> = {};
-  for (const { good, result } of sales) {
-    const acc = (soldValue[good] ??= { quantity: 0, breakdown: {} });
-    for (const [seller, q] of result.sold) {
-      if (q <= 0) continue;
-      acc.quantity += q;
-      for (const [ref, v] of Object.entries(firmById.get(seller)!.breakdown)) {
-        acc.breakdown[ref] = (acc.breakdown[ref] ?? 0) + q * v;
-      }
-    }
-  }
+  // 6b. Цены рынков: средняя цена сделок в провинции (с доставкой), затем средняя по стране.
   for (const [good, m] of Object.entries(state.market)) {
-    const acc = soldValue[good];
-    if (!acc || acc.quantity <= 0) continue;
-    const breakdown: Breakdown = {};
-    for (const [ref, v] of Object.entries(acc.breakdown)) breakdown[ref] = v / acc.quantity;
-    causes.push(breakdownChange(turn, `price.${good}`, m.breakdown, breakdown));
-    m.breakdown = breakdown;
-    m.price = sumBreakdown(breakdown);
-    prices[good] = m.price;
+    for (const [province, tally] of Object.entries(trade.tallies[good] ?? {})) {
+      const pm = m.provinces[province];
+      if (!pm || tally.quantity <= 0) continue;
+      const breakdown: Breakdown = {};
+      for (const [ref, v] of Object.entries(tally.weighted)) breakdown[ref] = v / tally.quantity;
+      causes.push(breakdownChange(turn, `price.${good}.${province}`, pm.breakdown, breakdown));
+      pm.breakdown = breakdown;
+      pm.price = sumBreakdown(breakdown);
+    }
+    const national = nationalAverage(state, good);
+    causes.push(breakdownChange(turn, `price.${good}`, m.breakdown, national.breakdown));
+    m.breakdown = national.breakdown;
+    m.price = national.price;
   }
 
-  // 6c. Прибыль и дивиденды; госдоходы в M3 сразу возвращаются населению трансфертами.
+  // 6c. Прибыль и дивиденды; госдоходы до M5 сразу возвращаются населению трансфертами.
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
-    firm.lastProfit = (revenue.get(firm.id) ?? 0) - (spent.get(firm.id) ?? 0);
+    firm.lastProfit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0);
     firm.lossTurns = firm.lastProfit < 0 ? firm.lossTurns + 1 : 0;
     const expectedRuns = mean(firm.ordersHistory) / recipe.output.amount;
-    const buffer = balance.firms.cashBufferTurns * expectedRuns * costPerRun(recipe, prices, state.wage);
+    const buffer = balance.firms.cashBufferTurns * expectedRuns * costPerRun(recipe, localPrices(firm.province), state.wage);
     const dividend = Math.max(0, firm.cash - buffer) * balance.firms.dividendPayoutShare;
     if (dividend <= 0) continue;
     firm.cash -= dividend;
     if (firm.owner === 'state') state.government.cash += dividend;
     else payHouseholds(state, dividend, (p) => p.households.population);
   }
+  {
+    const fuelPrice = state.market[logisticsCfg.fuelGood]?.price ?? 0;
+    const expected = mean(state.logistics.workHistory);
+    const cost = expected * logisticsCfg.fuelPerUnitLength * fuelPrice + state.logistics.lastLabor * state.wage;
+    const dividend = Math.max(0, state.logistics.cash - balance.firms.cashBufferTurns * cost) * balance.firms.dividendPayoutShare;
+    if (dividend > 0) {
+      state.logistics.cash -= dividend;
+      payHouseholds(state, dividend, (p) => p.households.population);
+    }
+  }
   payHouseholds(state, state.government.cash, (p) => p.households.population);
   state.government.cash = 0;
 
-  // 7a. Наценки и цены фирм на следующий ход.
+  // 7a. Наценки и цены фирм на следующий ход — по ценам входов в провинции фирмы.
   const expected = state.expectations.expected;
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
     const cov = coverage(firm.inventory[recipe.output.good] ?? 0, mean(firm.ordersHistory), balance.firms);
     firm.markup = nextMarkup(firm.markup, cov, balance.firms);
-    const unitCost = unitCostBreakdown(recipe, prices, state.wage);
+    const inputs: Record<GoodId, { price: number; breakdown: Breakdown }> = {};
+    for (const input of recipe.inputs) {
+      const m = state.market[input.good];
+      if (m) inputs[input.good] = m.provinces[firm.province] ?? m;
+    }
+    const unitCost = unitCostBreakdown(recipe, inputs, state.wage);
     const breakdown = nextPriceBreakdown(firm.breakdown, unitCost, firm.markup, expected, balance.firms);
     causes.push(breakdownChange(turn, `price.firm.${firm.id}`, firm.breakdown, breakdown));
     firm.breakdown = breakdown;
@@ -290,6 +326,16 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
   state.expectations.adaptive = exp.adaptive;
   state.expectations.expected = exp.expected;
 
+  const lane = data.buildings.find((b) => b.kind === 'route');
+  const routes: Record<string, RouteMetrics> = {};
+  for (const route of state.routes) {
+    routes[route.id] = {
+      flow: trade.routeFlow[route.id] ?? 0,
+      capacity: lane?.kind === 'route' ? routeCapacity(route, lane.capacityPerLane) : 0,
+      blocked: trade.routeBlocked[route.id] ?? 0,
+    };
+  }
+
   state.metrics = {
     cpi,
     inflationMoM,
@@ -303,6 +349,9 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     householdDemand,
     householdPurchases,
     shortage,
+    provinceShortage,
+    routes,
+    logisticsWork: trade.work,
   };
   state.turn = turn;
   return { state, causes };

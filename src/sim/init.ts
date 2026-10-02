@@ -1,14 +1,26 @@
-// Стартовое состояние из сценария. Цены считаются снизу вверх по цепочке (себестоимость + стартовая наценка),
-// заказы — сверху вниз от спроса домохозяйств, так что экономика стартует близко к равновесию.
+// Стартовое состояние из сценария, откалиброванное близко к равновесию:
+//  1) заказы — сверху вниз от спроса домохозяйств (плюс топливо перевозчика);
+//  2) потоки между провинциями — нехватка провинции покрывается остатками других по дорогам;
+//  3) цены — снизу вверх по цепочке, в каждой провинции свои: местное + привозное с тарифом.
 
 import type { GameData } from '../data/load';
 import type { Recipe, Scenario } from '../data/schemas';
 import type { Breakdown } from './causes';
 import { emptyQueue } from './delay';
-import type { Firm, GoodId, MarketGood, Metrics, Province, WorldState } from './state';
+import type { Firm, GoodId, Logistics, MarketGood, Metrics, Province, Route, RouteMetrics, WorldState } from './state';
 import { spendingShare } from './systems/demand';
+import {
+  laborPerUnit,
+  planShipments,
+  routeCapacity,
+  shortestPaths,
+  tariff,
+  type GoodBalance,
+  type Path,
+  type Shipment,
+} from './systems/logistics';
+import { COMPONENT, unitCostBreakdown, type InputPrice } from './systems/pricing';
 import { costPerRun } from './systems/production';
-import { COMPONENT, unitCostBreakdown } from './systems/pricing';
 import { annualToMonthly } from './units';
 
 function recipeOf(data: GameData, buildingId: string): { recipe: Recipe; capacity: number; owner: Firm['owner'] } {
@@ -38,12 +50,7 @@ function topologicalGoods(goods: Iterable<GoodId>, recipeByGood: Map<GoodId, Rec
   return order;
 }
 
-export function createInitialState(data: GameData, scenario: Scenario): WorldState {
-  const { balance } = data;
-  const wage = scenario.wage;
-  const m0 = balance.firms.initialMarkup;
-
-  // Фирмы.
+function createFirms(data: GameData, scenario: Scenario): { firms: Firm[]; recipeByGood: Map<GoodId, Recipe> } {
   const firms: Firm[] = [];
   const counters = new Map<string, number>();
   const recipeByGood = new Map<GoodId, Recipe>();
@@ -67,7 +74,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
         cash: 0,
         price: 0,
         breakdown: {},
-        markup: m0,
+        markup: data.balance.firms.initialMarkup,
         ordersHistory: [],
         lastRuns: 0,
         lastSales: 0,
@@ -76,81 +83,239 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       });
     }
   }
+  return { firms, recipeByGood };
+}
 
-  // Цены снизу вверх.
-  const order = topologicalGoods(Object.keys(balance.demand.goods), recipeByGood);
-  const prices: Record<GoodId, number> = {};
-  const market: Record<GoodId, MarketGood> = {};
+interface Plan {
+  /** Запуски рецепта за ход по фирмам. */
+  runs: Map<string, number>;
+  output: Record<GoodId, number>;
+  /** Потоки по товарам. */
+  shipments: Record<GoodId, Shipment[]>;
+  /** Работа перевозчика: груз × длина. */
+  work: number;
+  logisticsLabor: number;
+  requested: Logistics['requested'];
+}
+
+export function createInitialState(data: GameData, scenario: Scenario): WorldState {
+  const { balance } = data;
+  const wage = scenario.wage;
+  const m0 = balance.firms.initialMarkup;
+  const cfg = balance.logistics;
+  const { firms, recipeByGood } = createFirms(data, scenario);
+  const provinceIds = scenario.provinces.map((p) => p.id);
+  const population = scenario.provinces.reduce((sum, p) => sum + p.population, 0);
+  const recipeFor = (firm: Firm) => data.recipes.find((r) => r.id === firm.recipe)!;
+
+  const routes: Route[] = scenario.routes.map((r) => ({ ...r }));
+  const paths = shortestPaths(provinceIds, routes);
+  const lane = data.buildings.find((b) => b.kind === 'route');
+  const capacityPerLane = lane?.kind === 'route' ? lane.capacityPerLane : 0;
+
+  const goods = [...(recipeByGood.has(cfg.fuelGood) ? [cfg.fuelGood] : []), ...Object.keys(balance.demand.goods)];
+  const order = topologicalGoods(goods, recipeByGood);
+
+  // 1–2. Заказы и потоки. Топливо перевозчика зависит от потоков, поэтому план считается дважды.
+  const makePlan = (logisticsFuel: number): Plan => {
+    const need: Record<GoodId, number> = {};
+    for (const [good, params] of Object.entries(balance.demand.goods)) need[good] = params.basePerCapita * population;
+    need[cfg.fuelGood] = (need[cfg.fuelGood] ?? 0) + logisticsFuel;
+    const output: Record<GoodId, number> = {};
+    const runs = new Map<string, number>();
+    for (const good of [...order].reverse()) {
+      const recipe = recipeByGood.get(good)!;
+      const producers = firms.filter((f) => f.recipe === recipe.id);
+      const capacity = producers.reduce((sum, f) => sum + f.capacity, 0);
+      const out = Math.min(need[good] ?? 0, capacity * recipe.output.amount);
+      output[good] = out;
+      for (const f of producers) runs.set(f.id, ((out / recipe.output.amount) * f.capacity) / capacity);
+      for (const input of recipe.inputs) need[input.good] = (need[input.good] ?? 0) + (out / recipe.output.amount) * input.amount;
+    }
+
+    const capacityLeft: Record<string, number> = {};
+    for (const r of routes) capacityLeft[r.id] = routeCapacity(r, capacityPerLane);
+    const balances: GoodBalance[] = [];
+    /** Доля домохозяйств в спросе провинции на товар — чтобы разделить заявки на перевозку по фазам. */
+    const householdShare: Record<GoodId, Record<string, number>> = {};
+    for (const good of order) {
+      const households: Record<string, number> = {};
+      const demand: Record<string, number> = {};
+      const supply: Record<string, number> = {};
+      for (const p of scenario.provinces) {
+        households[p.id] = (balance.demand.goods[good]?.basePerCapita ?? 0) * p.population;
+        demand[p.id] = households[p.id]!;
+      }
+      for (const f of firms) {
+        const recipe = recipeFor(f);
+        const r = runs.get(f.id) ?? 0;
+        if (recipe.output.good === good) supply[f.province] = (supply[f.province] ?? 0) + r * recipe.output.amount;
+        for (const input of recipe.inputs) {
+          if (input.good === good) demand[f.province] = (demand[f.province] ?? 0) + r * input.amount;
+        }
+      }
+      const deficits: Record<string, number> = {};
+      const stocks: Record<string, number> = {};
+      householdShare[good] = {};
+      for (const p of provinceIds) {
+        const local = Math.min(demand[p] ?? 0, supply[p] ?? 0);
+        deficits[p] = (demand[p] ?? 0) - local;
+        stocks[p] = (supply[p] ?? 0) - local;
+        householdShare[good][p] = (demand[p] ?? 0) > 0 ? (households[p] ?? 0) / demand[p]! : 0;
+      }
+      balances.push({ good, deficits, stocks });
+    }
+    const list = planShipments(balances, paths, { capacityLeft, fuel: Infinity, labor: Infinity }, cfg);
+    const shipments: Record<GoodId, Shipment[]> = Object.fromEntries(order.map((g) => [g, []]));
+    const requested: Logistics['requested'] = { inputs: {}, consumer: {} };
+    let work = 0;
+    let logisticsLabor = 0;
+    for (const sh of list) {
+      shipments[sh.good]!.push(sh);
+      work += sh.quantity * sh.path.length;
+      logisticsLabor += sh.quantity * laborPerUnit(sh.path, cfg);
+      const hh = householdShare[sh.good]?.[sh.to] ?? 0;
+      for (const e of sh.path.edges) {
+        requested.consumer[e] = (requested.consumer[e] ?? 0) + sh.requested * hh;
+        requested.inputs[e] = (requested.inputs[e] ?? 0) + sh.requested * (1 - hh);
+      }
+    }
+    return { runs, output, shipments, work, logisticsLabor, requested };
+  };
+  const first = makePlan(0);
+  const plan = makePlan(first.work * cfg.fuelPerUnitLength);
+
+  // 3. Цены по провинциям снизу вверх.
+  const producerPrice: Record<GoodId, Record<string, InputPrice>> = {};
+  const marketPrice: Record<GoodId, Record<string, InputPrice>> = {};
+  let fuelPrice = 0;
+  const tariffOf = (path: Path) => tariff(path, fuelPrice, wage, cfg);
   for (const good of order) {
     const recipe = recipeByGood.get(good)!;
-    const cost = unitCostBreakdown(recipe, prices, wage);
-    let c = 0;
-    for (const v of Object.values(cost)) c += v;
-    const breakdown: Breakdown = { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.expectations]: 0 };
-    const price = c * (1 + m0);
-    prices[good] = price;
-    market[good] = { price, breakdown, referencePrice: price };
+    producerPrice[good] = {};
+    for (const p of provinceIds) {
+      if (!firms.some((f) => f.recipe === recipe.id && f.province === p)) continue;
+      const inputs: Record<GoodId, InputPrice> = {};
+      for (const input of recipe.inputs) inputs[input.good] = marketPrice[input.good]![p]!;
+      const cost = unitCostBreakdown(recipe, inputs, wage);
+      let c = 0;
+      for (const v of Object.values(cost)) c += v;
+      producerPrice[good][p] = { price: c * (1 + m0), breakdown: { ...cost, [COMPONENT.markup]: c * m0, [COMPONENT.expectations]: 0 } };
+    }
+    // Средняя цена производителей (взвешена по выпуску) — для провинций без сделок и для тарифа.
+    const average: Breakdown = {};
+    let outputTotal = 0;
+    for (const f of firms.filter((x) => x.recipe === recipe.id)) {
+      const q = plan.runs.get(f.id) ?? 0;
+      outputTotal += q;
+      for (const [ref, v] of Object.entries(producerPrice[good][f.province]!.breakdown)) average[ref] = (average[ref] ?? 0) + q * v;
+    }
+    for (const ref of Object.keys(average)) average[ref] = outputTotal > 0 ? average[ref]! / outputTotal : 0;
+    if (good === cfg.fuelGood) fuelPrice = Object.values(average).reduce((s, v) => s + v, 0);
+
+    marketPrice[good] = {};
+    for (const p of provinceIds) {
+      const weighted: Breakdown = {};
+      let quantity = 0;
+      const addTx = (q: number, from: InputPrice, delivery: number) => {
+        if (q <= 0) return;
+        quantity += q;
+        for (const [ref, v] of Object.entries(from.breakdown)) weighted[ref] = (weighted[ref] ?? 0) + q * v;
+        if (delivery !== 0) weighted[COMPONENT.logistics] = (weighted[COMPONENT.logistics] ?? 0) + q * delivery;
+      };
+      const local = producerPrice[good][p];
+      const supplyLocal = firms
+        .filter((f) => f.recipe === recipe.id && f.province === p)
+        .reduce((s, f) => s + (plan.runs.get(f.id) ?? 0) * recipe.output.amount, 0);
+      const shippedOut = plan.shipments[good]!.filter((s) => s.from === p).reduce((s, x) => s + x.quantity, 0);
+      if (local) addTx(supplyLocal - shippedOut, local, 0);
+      for (const s of plan.shipments[good]!.filter((x) => x.to === p)) addTx(s.quantity, producerPrice[good][s.from]!, tariffOf(s.path));
+      const breakdown: Breakdown = {};
+      if (quantity > 0) for (const [ref, v] of Object.entries(weighted)) breakdown[ref] = v / quantity;
+      else Object.assign(breakdown, local?.breakdown ?? average);
+      marketPrice[good][p] = { price: Object.values(breakdown).reduce((s, v) => s + v, 0), breakdown };
+    }
   }
 
-  // Заказы сверху вниз: спрос домохозяйств → нужды звеньев выше по цепочке.
-  const population = scenario.provinces.reduce((sum, p) => sum + p.population, 0);
-  const need: Record<GoodId, number> = {};
-  for (const [good, params] of Object.entries(balance.demand.goods)) need[good] = params.basePerCapita * population;
-  const outputByGood: Record<GoodId, number> = {};
-  for (const good of [...order].reverse()) {
-    const recipe = recipeByGood.get(good)!;
-    const capacityOutput = firms
-      .filter((f) => f.recipe === recipe.id)
-      .reduce((sum, f) => sum + f.capacity * recipe.output.amount, 0);
-    const output = Math.min(need[good] ?? 0, capacityOutput);
-    outputByGood[good] = output;
-    const runs = output / recipe.output.amount;
-    for (const input of recipe.inputs) need[input.good] = (need[input.good] ?? 0) + runs * input.amount;
+  const market: Record<GoodId, MarketGood> = {};
+  for (const good of order) {
+    const national: Breakdown = {};
+    for (const p of scenario.provinces) {
+      for (const [ref, v] of Object.entries(marketPrice[good]![p.id]!.breakdown)) {
+        national[ref] = (national[ref] ?? 0) + (v * p.population) / population;
+      }
+    }
+    const price = Object.values(national).reduce((s, v) => s + v, 0);
+    const provinces: MarketGood['provinces'] = {};
+    for (const p of provinceIds) {
+      const pm = marketPrice[good]![p]!;
+      provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price };
+    }
+    market[good] = { price, breakdown: national, referencePrice: price, provinces };
   }
 
-  let laborDemand = 0;
+  // 4. Фирмы.
+  let laborDemand = plan.logisticsLabor;
   for (const firm of firms) {
-    const recipe = data.recipes.find((r) => r.id === firm.recipe)!;
+    const recipe = recipeFor(firm);
     const good = recipe.output.good;
-    const sameRecipe = firms.filter((f) => f.recipe === recipe.id);
-    const totalCapacity = sameRecipe.reduce((sum, f) => sum + f.capacity, 0);
-    const orders = ((outputByGood[good] ?? 0) * firm.capacity) / totalCapacity;
-    const runs = orders / recipe.output.amount;
+    const runs = plan.runs.get(firm.id) ?? 0;
+    const orders = runs * recipe.output.amount;
+    const prices: Record<GoodId, number> = {};
+    for (const g of order) prices[g] = marketPrice[g]![firm.province]!.price;
     laborDemand += runs * recipe.labor;
     firm.ordersHistory = Array.from({ length: balance.firms.salesAverageTurns }, () => orders);
     firm.inventory = { [good]: balance.firms.targetCoverage * orders };
     firm.cash = balance.firms.cashBufferTurns * runs * costPerRun(recipe, prices, wage);
-    firm.price = prices[good] ?? 0;
-    firm.breakdown = { ...market[good]!.breakdown };
+    const own = producerPrice[good]![firm.province]!;
+    firm.price = own.price;
+    firm.breakdown = { ...own.breakdown };
     firm.lastRuns = runs;
     firm.lastSales = orders;
   }
 
-  // Домохозяйства: сбережения такие, чтобы s × (сбережения + зарплата) ≈ стартовые траты.
+  const logistics: Logistics = {
+    cash: balance.firms.cashBufferTurns * (plan.work * cfg.fuelPerUnitLength * fuelPrice + plan.logisticsLabor * wage),
+    fuel: plan.work * cfg.fuelPerUnitLength * balance.firms.targetCoverage,
+    workHistory: Array.from({ length: balance.firms.salesAverageTurns }, () => plan.work),
+    lastWork: plan.work,
+    lastLabor: plan.logisticsLabor,
+    requested: plan.requested,
+  };
+
+  // 5. Домохозяйства: сбережения такие, чтобы s × (сбережения + зарплата) ≈ стартовые траты.
   const s = spendingShare(scenario.keyRate, balance.demand);
   if (s <= 0) throw new Error('при стартовой ставке домохозяйства ничего не тратят');
   const laborForce = scenario.provinces.reduce((sum, p) => sum + p.laborForce, 0);
   const employment = Math.min(laborDemand, laborForce);
-  let spendingPerCapita = 0;
-  for (const [good, params] of Object.entries(balance.demand.goods)) {
-    spendingPerCapita += (prices[good] ?? 0) * params.basePerCapita;
-  }
   const provinces: Province[] = scenario.provinces.map((p) => {
+    let perCapita = 0;
+    for (const [good, params] of Object.entries(balance.demand.goods)) {
+      perCapita += marketPrice[good]![p.id]!.price * params.basePerCapita;
+    }
     const wageIncome = (employment * wage * p.laborForce) / laborForce;
-    const spending = spendingPerCapita * p.population;
     return {
       id: p.id,
       nameKey: p.nameKey,
       households: {
         population: p.population,
         laborForce: p.laborForce,
-        cash: Math.max(0, spending / s - wageIncome),
+        cash: Math.max(0, (perCapita * p.population) / s - wageIncome),
+        referenceSpendingPerCapita: perCapita,
       },
     };
   });
 
+  const routeMetrics: Record<string, RouteMetrics> = {};
+  for (const r of routes) routeMetrics[r.id] = { flow: 0, capacity: routeCapacity(r, capacityPerLane), blocked: 0 };
+  for (const list of Object.values(plan.shipments)) {
+    for (const sh of list) for (const e of sh.path.edges) routeMetrics[e]!.flow += sh.quantity;
+  }
+
   const monthlyTarget = annualToMonthly(balance.expectations.inflationTarget);
   const zeroByGood = () => Object.fromEntries(order.map((g) => [g, 0]));
+  let spending = 0;
+  for (const p of provinces) spending += p.households.referenceSpendingPerCapita * p.households.population;
   const metrics: Metrics = {
     cpi: 100,
     inflationMoM: 0,
@@ -159,11 +324,14 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     employment,
     wage,
     realWage: wage,
-    householdSpending: spendingPerCapita * population,
-    output: { ...outputByGood },
+    householdSpending: spending,
+    output: { ...plan.output },
     householdDemand: zeroByGood(),
     householdPurchases: zeroByGood(),
     shortage: zeroByGood(),
+    provinceShortage: Object.fromEntries(provinceIds.map((p) => [p, zeroByGood()])),
+    routes: routeMetrics,
+    logisticsWork: plan.work,
   };
 
   return {
@@ -171,8 +339,9 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     wage,
     keyRate: scenario.keyRate,
     demandRate: scenario.keyRate,
-    referenceSpendingPerCapita: spendingPerCapita,
     provinces,
+    routes,
+    logistics,
     firms,
     market,
     government: { cash: 0 },
