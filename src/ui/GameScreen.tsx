@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'preact/hooks';
-import scenarioRaw from '../../data/scenarios/baseline.json';
-import { getGameData, loadScenario } from '../data';
+import { getGameData, getScenario, type Level } from '../data';
 import { contextFromState, formatWhyLine, metricLabel, why } from '../game/explain';
+import { advanceLevel, evaluateLevel, isAllowed, startLevel } from '../game/level';
 import { addDecision, createSession, currentState, decisionKey, endTurn, fastForward, previousState, removeDecision, type Session } from '../game/session';
 import { monthSummary, type SummaryItem } from '../game/summary';
 import { t } from '../i18n';
@@ -11,7 +11,8 @@ import { BuildPanel } from './BuildPanel';
 import { ChartsPanel } from './ChartsPanel';
 import { DecisionsPanel } from './DecisionsPanel';
 import { Modal } from './controls';
-import { describeSummary } from './labels';
+import { describeDecision, describeSummary } from './labels';
+import { GoalList, LevelReport, reportTitle } from './LevelViews';
 import { MapView } from './MapView';
 import { PolicyPanel } from './PolicyPanel';
 import { TopBar, type TopMetric } from './TopBar';
@@ -20,11 +21,18 @@ import { XrayView } from './XrayView';
 /** График, который открывается из «Почему?» у показателя верхней панели. */
 const TOP_CHART: Partial<Record<TopMetric, ChartMetric>> = { cpi: 'cpi', unemployment: 'unemployment', 'budget.balance': 'budgetBalance' };
 
+/** Песочница: сценарий и seed без уровня. */
+const SANDBOX_SCENARIO = 'baseline';
 const SEED = 42;
 const FAST_FORWARD_TURNS = 3;
 
 type Tab = 'policy' | 'build' | 'charts';
-type Dialog = { kind: 'summary'; turn: number; items: SummaryItem[] } | { kind: 'why'; metric: TopMetric } | null;
+type Dialog =
+  | { kind: 'summary'; turn: number; items: SummaryItem[]; news: Action[] }
+  | { kind: 'why'; metric: TopMetric }
+  | { kind: 'goals' }
+  | { kind: 'report' }
+  | null;
 
 /** Решение, которое ничего не меняет (вернули рычаг к текущему значению), — убирает прежнее решение. */
 function isNoop(action: Action, state: WorldState): boolean {
@@ -48,11 +56,20 @@ function isNoop(action: Action, state: WorldState): boolean {
   }
 }
 
+interface Props {
+  /** Уровень кампании; без него — песочница (без целей и срока). */
+  level?: Level;
+  onBack: () => void;
+  onReplay: () => void;
+}
+
 /** Основной экран (GDD 7): верхняя панель, карта, панели «Строить»/«Политика», ход и сводка месяца. */
-export function GameScreen({ onBack }: { onBack: () => void }) {
+export function GameScreen({ level, onBack, onReplay }: Props) {
   const data = getGameData();
-  const scenario = useMemo(() => loadScenario(scenarioRaw, data), [data]);
-  const [session, setSession] = useState<Session>(() => createSession(data, scenario, SEED));
+  const scenario = getScenario(level?.scenario ?? SANDBOX_SCENARIO);
+  const [session, setSession] = useState<Session>(() => (level ? startLevel(data, level, scenario) : createSession(data, scenario, SEED)));
+  const status = useMemo(() => (level ? evaluateLevel(level, session.history, data.balance) : undefined), [level, session.history, data]);
+  const finished = status !== undefined && status.outcome !== 'playing';
   const [tab, setTab] = useState<Tab>('policy');
   /** На телефоне панель свёрнута, чтобы карте хватало места; на компьютере она открыта всегда (CSS). */
   const [panelOpen, setPanelOpen] = useState(false);
@@ -74,6 +91,7 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
   const consumerGoods = Object.keys(data.balance.demand.goods);
 
   const decide = (action: Action) => {
+    if (finished || (level && !isAllowed(level, action, data))) return;
     setSession((s) => {
       const key = decisionKey(action);
       if (key !== undefined && isNoop(action, currentState(s))) {
@@ -84,11 +102,22 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
   };
 
   const advance = (turns: number) => {
-    const next = turns === 1 ? endTurn(session, data) : fastForward(session, data, turns);
+    if (finished) return;
+    const next = level ? advanceLevel(session, data, level, turns) : turns === 1 ? endTurn(session, data) : fastForward(session, data, turns);
     const last = next.history.at(-1)!;
     const before = next.history.at(-2)!.state;
     setSession(next);
-    setDialog({ kind: 'summary', turn: last.state.turn, items: monthSummary(before, last.state, last.causes, contextFromState(last.state), consumerGoods) });
+    if (level && evaluateLevel(level, next.history, data.balance).outcome !== 'playing') {
+      setDialog({ kind: 'report' });
+      return;
+    }
+    const news = next.history.slice(session.history.length).flatMap((h) => h.events);
+    setDialog({
+      kind: 'summary',
+      turn: last.state.turn,
+      items: monthSummary(before, last.state, last.causes, contextFromState(last.state), consumerGoods),
+      news,
+    });
   };
 
   const whyDialog = (metric: TopMetric) => {
@@ -113,7 +142,12 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
         <button type="button" class="chip" onClick={onBack}>
           {t('game.back')}
         </button>
-        <span class="game__turn">{t('game.turn', { turn: state.turn })}</span>
+        <span class="game__turn">{level ? t('game.turnOf', { turn: state.turn, turns: level.turns }) : t('game.turn', { turn: state.turn })}</span>
+        {status && (
+          <button type="button" class="chip game__goals" onClick={() => setDialog({ kind: 'goals' })}>
+            {t('goals.button', { met: status.goals.filter((g) => g.state === 'met').length, total: status.goals.length })}
+          </button>
+        )}
       </header>
       <TopBar state={state} prev={prev} onWhy={(metric) => setDialog({ kind: 'why', metric })} />
       <main class="game__map">
@@ -149,13 +183,21 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
           ))}
         </div>
         <div class={panelOpen ? 'game__panel game__panel--open' : 'game__panel'}>
-          {tab === 'policy' && <PolicyPanel state={state} data={data} decisions={session.decisions} onDecide={decide} />}
-          {tab === 'build' && <BuildPanel state={state} data={data} onDecide={decide} />}
+          {tab === 'policy' && (
+            <PolicyPanel state={state} data={data} decisions={session.decisions} onDecide={decide} {...(level ? { levers: level.levers } : {})} />
+          )}
+          {tab === 'build' && <BuildPanel state={state} data={data} onDecide={decide} {...(level ? { allowed: level.buildings } : {})} />}
           {tab === 'charts' && (
             <div class="panel">
               <div class="segmented" role="group">
                 {(['xray', 'indicators'] as const).map((v) => (
-                  <button key={v} type="button" class={chartsView === v ? 'chip chip--active' : 'chip'} aria-pressed={chartsView === v} onClick={() => setChartsView(v)}>
+                  <button
+                    key={v}
+                    type="button"
+                    class={chartsView === v ? 'chip chip--active' : 'chip'}
+                    aria-pressed={chartsView === v}
+                    onClick={() => setChartsView(v)}
+                  >
                     {t(v === 'xray' ? 'charts.xray' : 'charts.indicators')}
                   </button>
                 ))}
@@ -177,21 +219,37 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
           )}
           <DecisionsPanel state={state} data={data} decisions={session.decisions} onRemove={(i) => setSession((s) => removeDecision(s, i))} />
         </div>
-        {!panelOpen && session.decisions.length > 0 && (
-          <p class="game__decisions-count">{t('decisions.count', { count: session.decisions.length })}</p>
-        )}
+        {!panelOpen && session.decisions.length > 0 && <p class="game__decisions-count">{t('decisions.count', { count: session.decisions.length })}</p>}
         <div class="turnbar">
-          <button type="button" class="turnbar__secondary" onClick={() => advance(FAST_FORWARD_TURNS)}>
-            {t('game.skip3')}
-          </button>
-          <button type="button" class="turnbar__primary" onClick={() => advance(1)}>
-            {t('game.next')}
-          </button>
+          {finished ? (
+            <button type="button" class="turnbar__primary" onClick={() => setDialog({ kind: 'report' })}>
+              {t('report.open')}
+            </button>
+          ) : (
+            <>
+              <button type="button" class="turnbar__secondary" onClick={() => advance(FAST_FORWARD_TURNS)}>
+                {t('game.skip3')}
+              </button>
+              <button type="button" class="turnbar__primary" onClick={() => advance(1)}>
+                {t('game.next')}
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
       {dialog?.kind === 'summary' && (
         <Modal title={t('summary.title', { turn: dialog.turn })} onClose={() => setDialog(null)}>
+          {dialog.news.length > 0 && (
+            <div class="news">
+              <h3 class="section__title">{t('news.title')}</h3>
+              <ul>
+                {dialog.news.map((action, i) => (
+                  <li key={i}>⚠ {describeDecision(action, state, data)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {dialog.items.every((i) => i.importance < 1) && <p class="section__hint">{t('summary.calm')}</p>}
           <ol class="summary">
             {dialog.items.map((item, i) => (
@@ -217,6 +275,16 @@ export function GameScreen({ onBack }: { onBack: () => void }) {
           <button type="button" class="turnbar__primary modal__ok" onClick={() => setDialog(null)}>
             {t('summary.ok')}
           </button>
+        </Modal>
+      )}
+      {dialog?.kind === 'goals' && level && status && (
+        <Modal title={t('goals.title')} onClose={() => setDialog(null)}>
+          <GoalList level={level} statuses={status.goals} />
+        </Modal>
+      )}
+      {dialog?.kind === 'report' && level && (
+        <Modal title={reportTitle(level, session.history, data)} onClose={() => setDialog(null)}>
+          <LevelReport level={level} history={session.history} data={data} onReplay={onReplay} onMenu={onBack} onClose={() => setDialog(null)} />
         </Modal>
       )}
       {dialog?.kind === 'why' && (

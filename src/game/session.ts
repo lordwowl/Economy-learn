@@ -10,8 +10,10 @@ export interface TurnRecord {
   state: WorldState;
   /** События причинного журнала этого хода. */
   causes: CauseEvent[];
-  /** Решения, применённые в этом ходу. */
+  /** Решения игрока, применённые в этом ходу. */
   actions: Action[];
+  /** События уровня (шоки), сработавшие в этом ходу. */
+  events: Action[];
 }
 
 export interface Session {
@@ -27,7 +29,7 @@ export function createSession(data: GameData, scenario: Scenario, seed: number):
   return {
     seed,
     rngState: new Rng(seed).state,
-    history: [{ state: createInitialState(data, scenario), causes: [], actions: [] }],
+    history: [{ state: createInitialState(data, scenario), causes: [], actions: [], events: [] }],
     decisions: [],
   };
 }
@@ -77,12 +79,11 @@ export function removeDecision(session: Session, index: number): Session {
 /** Ход: решения игрока (+ события уровня, например шоки) → новый месяц. */
 export function endTurn(session: Session, data: GameData, events: readonly Action[] = []): Session {
   const rng = new Rng(session.rngState);
-  const actions = [...session.decisions, ...events];
-  const result = step(currentState(session), actions, rng, data);
+  const result = step(currentState(session), [...session.decisions, ...events], rng, data);
   return {
     ...session,
     rngState: rng.state,
-    history: [...session.history, { state: result.state, causes: result.causes, actions }],
+    history: [...session.history, { state: result.state, causes: result.causes, actions: session.decisions, events: [...events] }],
     decisions: [],
   };
 }

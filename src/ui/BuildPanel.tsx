@@ -9,12 +9,15 @@ interface Props {
   state: WorldState;
   data: GameData;
   onDecide: (action: Action) => void;
+  /** Что разрешено строить на уровне (id из buildings.json; по умолчанию — всё). */
+  allowed?: readonly string[];
 }
 
-export function BuildPanel({ state, data, onDecide }: Props) {
-  const lane = data.buildings.find((b) => b.kind === 'route');
-  const fleet = data.buildings.find((b) => b.kind === 'fleet');
-  const storages = data.buildings.filter((b) => b.kind === 'storage');
+export function BuildPanel({ state, data, onDecide, allowed }: Props) {
+  const can = (id: string | undefined) => id !== undefined && (allowed === undefined || allowed.includes(id));
+  const lane = data.buildings.find((b) => b.kind === 'route' && can(b.id));
+  const fleet = data.buildings.find((b) => b.kind === 'fleet' && can(b.id));
+  const storages = data.buildings.filter((b) => b.kind === 'storage' && can(b.id));
   const stateCarrier = state.logistics.carriers.find((c) => c.id === 'state');
 
   return (
@@ -36,24 +39,28 @@ export function BuildPanel({ state, data, onDecide }: Props) {
         </Section>
       )}
 
-      <Section title={t('build.storages')}>
-        {storages.map((b) =>
-          b.kind !== 'storage'
-            ? null
-            : state.provinces.map((p) => (
-                <div class="build-row" key={`${b.id}-${p.id}`}>
-                  <div class="build-row__text">
-                    <strong>{t('build.storage', { building: translate(b.nameKey), province: provinceName(state, p.id) })}</strong>
-                    <span>{num(b.storageCapacity)}</span>
+      {!lane && !fleet && storages.length === 0 && <p class="section__hint">{t('build.closed')}</p>}
+
+      {storages.length > 0 && (
+        <Section title={t('build.storages')}>
+          {storages.map((b) =>
+            b.kind !== 'storage'
+              ? null
+              : state.provinces.map((p) => (
+                  <div class="build-row" key={`${b.id}-${p.id}`}>
+                    <div class="build-row__text">
+                      <strong>{t('build.storage', { building: translate(b.nameKey), province: provinceName(state, p.id) })}</strong>
+                      <span>{num(b.storageCapacity)}</span>
+                    </div>
+                    <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStorage', building: b.id, province: p.id })}>
+                      +1
+                      <small>{t('build.cost', { cost: money(b.cost), turns: b.buildTurns })}</small>
+                    </button>
                   </div>
-                  <button type="button" class="chip chip--primary" onClick={() => onDecide({ type: 'buildStorage', building: b.id, province: p.id })}>
-                    +1
-                    <small>{t('build.cost', { cost: money(b.cost), turns: b.buildTurns })}</small>
-                  </button>
-                </div>
-              )),
-        )}
-      </Section>
+                )),
+          )}
+        </Section>
+      )}
 
       {fleet?.kind === 'fleet' && (
         <Section title={t('build.fleet')}>

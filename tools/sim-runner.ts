@@ -1,16 +1,20 @@
 // Headless-прогон для балансировки (CLAUDE.md):
 //   npm run sim -- --scenario baseline --seed 42 --policy passive --turns 24
+//   npm run sim -- --level 05 --policy all  — уровень: его сценарий, seed, срок и шоки + итог по целям и звёздам
 //   npm run sim -- --policy all            — все боты и сравнение итогов
 //   --format table|csv|json
 // Печатает метрики по ходам: ИПЦ, инфляцию, ИЦП, безработицу, зарплату, цены, дефицит, бюджет, долг.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getGameData, loadScenario, type GameData } from '../src/data';
-import { createInitialState, Rng, step, type WorldState } from '../src/sim';
+import { getGameData, getLevels, getScenario, loadScenario, type GameData, type Level } from '../src/data';
+import { evaluateLevel, levelEvents, type LevelStatus } from '../src/game/level';
+import { createInitialState, Rng, step, type Action, type WorldState } from '../src/sim';
 import { policies, policyNames } from './policies';
 
 export interface RunnerOptions {
+  /** Номер ("05") или id уровня; тогда сценарий, seed и срок по умолчанию — из уровня. */
+  level?: string;
   scenario: string;
   seed: number;
   policy: string;
@@ -36,13 +40,29 @@ export interface Row {
 
 const DEFAULTS: RunnerOptions = { scenario: 'baseline', seed: 42, policy: 'passive', turns: 24, format: 'table' };
 
+export function findLevel(name: string): Level {
+  const level = getLevels().find((l) => l.id === name || String(l.number).padStart(2, '0') === name.padStart(2, '0'));
+  if (!level)
+    throw new Error(
+      `Нет уровня "${name}". Есть: ${getLevels()
+        .map((l) => `${String(l.number).padStart(2, '0')} (${l.id})`)
+        .join(', ')}`,
+    );
+  return level;
+}
+
 export function parseArgs(argv: readonly string[]): RunnerOptions {
-  const options = { ...DEFAULTS };
+  const options: RunnerOptions = { ...DEFAULTS };
+  const given = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const [flag, value] = [argv[i], argv[i + 1]];
+    if (flag !== undefined) given.add(flag);
     switch (flag) {
       case '--level':
-        throw new Error('Уровни появятся в M11. Пока используйте --scenario (файлы data/scenarios/*.json).');
+        if (value === undefined) throw new Error('--level: укажите номер или id уровня');
+        options.level = value;
+        i++;
+        break;
       case '--scenario':
         options.scenario = value ?? options.scenario;
         i++;
@@ -67,6 +87,13 @@ export function parseArgs(argv: readonly string[]): RunnerOptions {
       default:
         throw new Error(`Неизвестный параметр "${flag}"`);
     }
+  }
+  if (options.level !== undefined) {
+    const level = findLevel(options.level);
+    if (given.has('--scenario')) throw new Error('--level и --scenario вместе нельзя: сценарий задаёт уровень');
+    options.scenario = level.scenario;
+    if (!given.has('--seed')) options.seed = level.seed;
+    if (!given.has('--turns')) options.turns = level.turns;
   }
   if (!Number.isInteger(options.seed)) throw new Error('--seed должен быть целым числом');
   if (!Number.isInteger(options.turns) || options.turns < 1) throw new Error('--turns должен быть целым числом ≥ 1');
@@ -105,16 +132,27 @@ function row(state: WorldState, events: string[]): Row {
   };
 }
 
-/** Прогон сценария с ботом: строки по ходам, первая — старт. */
-export function simulate(options: Omit<RunnerOptions, 'format'>, data: GameData = getGameData()): Row[] {
+export interface Simulation {
+  rows: Row[];
+  /** Итог уровня (только с --level): по первым level.turns ходам. */
+  level?: LevelStatus;
+}
+
+/** Прогон сценария (или уровня) с ботом: строки по ходам, первая — старт. */
+export function simulate(options: Omit<RunnerOptions, 'format'>, data: GameData = getGameData()): Simulation {
   const policy = policies[options.policy];
   if (!policy) throw new Error(`Нет политики "${options.policy}"`);
+  const level = options.level !== undefined ? findLevel(options.level) : undefined;
   const rng = new Rng(options.seed);
-  let state = createInitialState(data, loadScenarioFile(options.scenario, data));
+  let state = createInitialState(data, level ? getScenario(level.scenario) : loadScenarioFile(options.scenario, data));
   const rows = [row(state, [])];
+  const history: { state: WorldState; causes: []; actions: Action[]; events: Action[] }[] = [{ state, causes: [], actions: [], events: [] }];
   for (let t = 1; t <= options.turns; t++) {
-    const actions = policy(state, t, data);
+    const decisions = policy(state, t, data);
+    const shocks = level ? levelEvents(level, t) : [];
+    const actions = [...decisions, ...shocks];
     state = step(state, actions, rng, data).state;
+    history.push({ state, causes: [], actions: decisions, events: shocks });
     const events = [
       ...actions.map((a) => a.type),
       ...state.metrics.firmsOpened.map((id) => `+${id}`),
@@ -123,7 +161,22 @@ export function simulate(options: Omit<RunnerOptions, 'format'>, data: GameData 
     ];
     rows.push(row(state, events));
   }
-  return rows;
+  return { rows, ...(level ? { level: evaluateLevel(level, history.slice(0, level.turns + 1), data.balance) } : {}) };
+}
+
+const STAR_MARK = (stars: number) => '★'.repeat(stars) + '☆'.repeat(3 - stars);
+const GOAL_MARK = { met: '✓', failed: '✗', pending: '…' } as const;
+
+/** Итог уровня одной строкой: исход, звёзды, цели. */
+export function formatLevelStatus(status: LevelStatus): string {
+  const outcome =
+    status.outcome === 'defeated' && status.defeat
+      ? `провал на ходу ${status.defeat.turn}: ${status.defeat.reason}${status.defeat.reason === 'famine' ? ` (${status.defeat.province})` : ''}`
+      : status.outcome === 'completed'
+        ? 'пройден'
+        : `не закончен (ход ${status.turn})`;
+  const goals = status.goals.map((g) => `${GOAL_MARK[g.state]}${g.id}${g.value !== undefined ? `=${Number(g.value.toFixed(3))}` : ''}`).join(' ');
+  return `${outcome}, ${STAR_MARK(status.stars)}; цели: ${goals}`;
 }
 
 const pct = (x: number) => (x * 100).toFixed(1);
@@ -151,7 +204,12 @@ export function formatTable(rows: readonly Row[]): string {
   const cells = [COLUMNS.map((c) => c.title), ...rows.map((r) => COLUMNS.map((c) => c.value(r)))];
   const widths = COLUMNS.map((_, i) => Math.max(...cells.map((line) => line[i]!.length)));
   return cells
-    .map((line) => line.map((cell, i) => (i === line.length - 1 ? cell : cell.padStart(widths[i]!))).join('  ').trimEnd())
+    .map((line) =>
+      line
+        .map((cell, i) => (i === line.length - 1 ? cell : cell.padStart(widths[i]!)))
+        .join('  ')
+        .trimEnd(),
+    )
     .join('\n');
 }
 
@@ -160,14 +218,17 @@ export function formatCsv(rows: readonly Row[]): string {
 }
 
 /** Итоги разных ботов рядом: чтобы видеть, что у разных стратегий разные исходы. */
-export function formatComparison(results: Record<string, readonly Row[]>): string {
-  const summary = Object.entries(results).map(([policy, rows]) => {
+export function formatComparison(results: Record<string, Simulation>): string {
+  const withLevel = Object.values(results).some((r) => r.level);
+  const summary = Object.entries(results).map(([policy, { rows, level }]) => {
     const last = rows.at(-1)!;
     const maxUnemployment = Math.max(...rows.map((r) => r.unemployment));
     const maxShortage = Math.max(...rows.map((r) => Math.max(0, ...Object.values(r.maxShortage))));
-    return [policy, fix(last.cpi), pct(last.unemployment), pct(maxUnemployment), pct(maxShortage), fix(last.debt, 0), String(last.firms)];
+    const cells = [policy, fix(last.cpi), pct(last.unemployment), pct(maxUnemployment), pct(maxShortage), fix(last.debt, 0), String(last.firms)];
+    if (withLevel) cells.push(level?.outcome === 'defeated' ? `✗ ход ${level.defeat?.turn}` : STAR_MARK(level?.stars ?? 0));
+    return cells;
   });
-  const header = ['бот', 'ИПЦ итог', 'безр% итог', 'безр% макс', 'дефицит% макс', 'долг', 'фирм'];
+  const header = ['бот', 'ИПЦ итог', 'безр% итог', 'безр% макс', 'дефицит% макс', 'долг', 'фирм', ...(withLevel ? ['уровень'] : [])];
   const cells = [header, ...summary];
   const widths = header.map((_, i) => Math.max(...cells.map((line) => line[i]!.length)));
   return cells.map((line) => line.map((cell, i) => cell.padStart(widths[i]!)).join('  ')).join('\n');
@@ -176,11 +237,19 @@ export function formatComparison(results: Record<string, readonly Row[]>): strin
 export function main(argv: readonly string[]): string {
   const options = parseArgs(argv);
   const names = options.policy === 'all' ? policyNames : [options.policy];
-  const results: Record<string, Row[]> = {};
+  const results: Record<string, Simulation> = {};
   for (const name of names) results[name] = simulate({ ...options, policy: name });
-  if (options.format === 'json') return JSON.stringify(options.policy === 'all' ? results : results[options.policy], null, 1);
+  if (options.format === 'json') {
+    const json = (r: Simulation) => (r.level ? { rows: r.rows, level: r.level } : r.rows);
+    return JSON.stringify(options.policy === 'all' ? Object.fromEntries(names.map((n) => [n, json(results[n]!)])) : json(results[options.policy]!), null, 1);
+  }
   const format = options.format === 'csv' ? formatCsv : formatTable;
-  const parts = names.map((name) => `# ${options.scenario}, seed ${options.seed}, бот ${name}, ${options.turns} ходов\n${format(results[name]!)}`);
+  const title = options.level !== undefined ? `уровень ${options.level} (${options.scenario})` : options.scenario;
+  const parts = names.map((name) => {
+    const r = results[name]!;
+    const status = r.level ? `\n# итог уровня: ${formatLevelStatus(r.level)}` : '';
+    return `# ${title}, seed ${options.seed}, бот ${name}, ${options.turns} ходов\n${format(r.rows)}${status}`;
+  });
   if (names.length > 1) parts.push(`# сравнение ботов\n${formatComparison(results)}`);
   return parts.join('\n\n');
 }
