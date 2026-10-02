@@ -15,6 +15,7 @@ import { breakdownChange, makeCauseEvent, sumBreakdown, type Breakdown, type Cau
 import { schedule, spreadOverLag, takeDue } from './delay';
 import type { Rng } from './rng';
 import type { Action, Firm, GoodId, RouteMetrics, WorldState } from './state';
+import { borrowForPlan, chargeInterest, entryRoi, liquidate, loanRate, repay } from './systems/credit';
 import { planHouseholdPurchases } from './systems/demand';
 import { addRevenue, addSpending, BUDGET, payHouseholds, payWages, settleBudget } from './systems/government';
 import { nextExpectations } from './systems/expectations';
@@ -103,6 +104,13 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     if (effect.type === 'demandRate') state.demandRate += effect.delta;
     if (effect.type === 'creditRate') state.creditRate += effect.delta;
     if (effect.type === 'roadLane') state.routes.find((r) => r.id === effect.route)!.lanes += 1;
+    if (effect.type === 'firmReady') {
+      const firm = state.firms.find((f) => f.id === effect.firm);
+      if (firm) {
+        firm.capacity = effect.capacity;
+        firm.underConstruction = false;
+      }
+    }
   }
 
   const localPrices = (province: string): Record<GoodId, number> => {
@@ -111,12 +119,16 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     return prices;
   };
 
-  // 2. Планы.
+  // 2. Планы; не хватает денег на выгодный план — оборотный кредит.
   const plan = new Map<string, number>();
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
     const prices = localPrices(firm.province);
-    plan.set(firm.id, Math.min(plannedRuns(firm, recipe, balance.firms), affordableRuns(firm, recipe, prices, state.wage)));
+    const planned = plannedRuns(firm, recipe, balance.firms);
+    if (planned > affordableRuns(firm, recipe, prices, state.wage)) {
+      borrowForPlan(firm, recipe, planned, prices, state.wage, state.government.taxes.sales, balance.credit);
+    }
+    plan.set(firm.id, Math.min(planned, affordableRuns(firm, recipe, prices, state.wage)));
   }
   // Труда на всех не хватает → фабрики и перевозчик (по его загрузке прошлого хода) урезаются в одной пропорции.
   const laborForce = state.provinces.reduce((sum, p) => sum + p.households.laborForce, 0);
@@ -269,17 +281,19 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     m.price = national.price;
   }
 
-  // 6c. Прибыль, налог на прибыль и дивиденды (госфирмы — в бюджет).
+  // 6c. Проценты, прибыль, налог на прибыль, погашение долга и дивиденды (госфирмы — в бюджет).
   for (const firm of state.firms) {
     const recipe = recipeOf(firm);
-    const profit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0);
+    const interest = chargeInterest(firm, state, balance.credit);
+    const profit = (trade.revenue.get(firm.id) ?? 0) - (trade.spent.get(firm.id) ?? 0) - interest;
     const profitTax = Math.max(0, profit) * state.government.taxes.profit;
     firm.cash -= profitTax;
     addRevenue(state, BUDGET.profitTax, profitTax);
     firm.lastProfit = profit - profitTax;
-    firm.lossTurns = firm.lastProfit < 0 ? firm.lossTurns + 1 : 0;
+    firm.lossTurns = firm.lastProfit < 0 && !firm.underConstruction ? firm.lossTurns + 1 : 0;
     const expectedRuns = mean(firm.ordersHistory) / recipe.output.amount;
     const buffer = balance.firms.cashBufferTurns * expectedRuns * costPerRun(recipe, localPrices(firm.province), state.wage);
+    repay(firm, buffer);
     const dividend = Math.max(0, firm.cash - buffer) * balance.firms.dividendPayoutShare;
     if (dividend <= 0) continue;
     firm.cash -= dividend;
@@ -297,7 +311,70 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     }
   }
 
-  // 6d. ВВП (добавленная стоимость) и бюджет: проценты, трансферты, займ или погашение долга.
+  // 6d. Закрытие: частная фирма после N месяцев убытков подряд. Долг гасится остатком денег, остальное банк списывает.
+  const firmsClosed: string[] = [];
+  state.firms = state.firms.filter((firm) => {
+    if (firm.owner !== 'private' || firm.underConstruction || firm.lossTurns < balance.firms.closeAfterLossTurns) return true;
+    payHouseholds(state, liquidate(firm, state), (p) => p.households.population);
+    firmsClosed.push(firm.id);
+    return false;
+  });
+
+  // 6e. Вход: устойчивый дефицит в провинции + высокая наценка + окупаемость выше ставки кредита → новая фирма в кредит.
+  const firmsOpened: string[] = [];
+  for (const [good, m] of Object.entries(state.market)) {
+    const producers = state.firms.filter((f) => outputOf(f) === good);
+    for (const province of state.provinces) {
+      const pm = m.provinces[province.id];
+      if (!pm) continue;
+      const outcomes = [inputOutcomes.get(good), consumerOutcomes.get(good)];
+      const demanded = outcomes.reduce((s, o) => s + (o?.demandedByProvince[province.id] ?? 0), 0);
+      const unmet = outcomes.reduce((s, o) => s + (o?.unmetByProvince[province.id] ?? 0), 0);
+      pm.shortageTurns = demanded > 0 && unmet / demanded > balance.credit.entryShortageThreshold ? pm.shortageTurns + 1 : 0;
+      if (pm.shortageTurns < balance.credit.entryShortageTurns) continue;
+      const building = data.buildings.find(
+        (b) => b.kind === 'producer' && b.owner === 'private' && recipes.get(b.recipe)?.output.good === good,
+      );
+      if (building?.kind !== 'producer') continue;
+      const recipe = recipes.get(building.recipe)!;
+      const markup = producers.length > 0 ? mean(producers.map((f) => f.markup)) : balance.firms.initialMarkup;
+      if (markup < balance.credit.entryMinMarkup) continue;
+      const capacity = producers.reduce((s, f) => s + f.capacity, 0);
+      const utilization = capacity > 0 ? producers.reduce((s, f) => s + f.lastRuns, 0) / capacity : 1;
+      if (utilization < balance.credit.entryMinUtilization) continue;
+      const roi = entryRoi(building, recipe, pm.price, localPrices(province.id), state.wage, state.government.taxes.sales);
+      if (roi <= loanRate(state, balance.credit) + balance.credit.expansionRoiMargin) continue;
+      const template = producers.find((f) => f.province === province.id) ?? producers[0];
+      const id = `${building.id}-${province.id}-t${turn}`;
+      state.firms.push({
+        id,
+        building: building.id,
+        recipe: recipe.id,
+        owner: building.owner,
+        province: province.id,
+        capacity: 0,
+        inventory: {},
+        cash: 0,
+        debt: building.cost,
+        underConstruction: true,
+        price: template?.price ?? pm.price,
+        breakdown: { ...(template?.breakdown ?? pm.breakdown) },
+        markup: balance.firms.initialMarkup,
+        ordersHistory: [],
+        lastRuns: 0,
+        lastSales: 0,
+        lastProfit: 0,
+        lossTurns: 0,
+      });
+      // Стройка в кредит: деньги банка уходят строителям — населению.
+      payHouseholds(state, building.cost, (p) => p.households.laborForce);
+      state.pending = schedule(state.pending, turn + building.buildTurns, { type: 'firmReady', firm: id, capacity: building.capacity });
+      pm.shortageTurns = 0;
+      firmsOpened.push(id);
+    }
+  }
+
+  // 6f. ВВП (добавленная стоимость) и бюджет: проценты, трансферты, займ или погашение долга.
   let gdp = trade.logisticsRevenue - trade.logisticsFuelCost;
   for (const firm of state.firms) gdp += (trade.revenue.get(firm.id) ?? 0) - (trade.inputSpent.get(firm.id) ?? 0);
   settleBudget(state, prev.metrics.gdp, balance.government);
@@ -391,6 +468,8 @@ export function step(prev: WorldState, actions: readonly Action[], rng: Rng, dat
     logisticsWork: trade.work,
     gdp,
     budgetBalance: budgetEvent.delta,
+    firmsOpened,
+    firmsClosed,
   };
   state.turn = turn;
   return { state, causes };

@@ -23,7 +23,7 @@ export interface HouseholdPlan {
 export function planHouseholdPurchases(
   households: Households,
   rate: number,
-  market: Record<GoodId, ProvinceMarket>,
+  market: Record<GoodId, Pick<ProvinceMarket, 'price' | 'referencePrice'>>,
   demand: Balance['demand'],
 ): HouseholdPlan {
   const budget = spendingShare(rate, demand) * Math.max(0, households.cash);

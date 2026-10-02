@@ -154,14 +154,22 @@ export const balanceSchema = z.strictObject({
     naturalUnemployment: share,
     /** φ. */
     wageAdjustSpeed: nonNegative,
+    /** Номинальная зарплата падает не быстрее этой доли в месяц (зарплаты «липкие» вниз). */
+    maxMonthlyWageCut: share,
   }),
   credit: z.strictObject({
     /** Спред: ставка_кредита = ключевая + спред. */
     loanSpread: nonNegative,
+    /** Лимит долга фирмы в месяцах ожидаемых продаж. */
+    maxDebtToMonthlySales: nonNegative,
     /** Порог: фирма расширяется, если ROI > ставка_кредита + порог. */
     expansionRoiMargin: nonNegative,
+    /** Дефицит (доля неудовлетворённого спроса в провинции), который считается устойчивым. */
+    entryShortageThreshold: share,
     /** Сколько ходов подряд нужен дефицит для входа новой фирмы. */
     entryShortageTurns: turns,
+    /** Новая фирма входит, только если существующие производители загружены не меньше этого (дефицит из-за мощностей, а не входов). */
+    entryMinUtilization: share,
     /** Минимальная наценка для входа новой фирмы. */
     entryMinMarkup: z.number().finite(),
   }),

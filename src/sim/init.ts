@@ -73,6 +73,8 @@ function createFirms(data: GameData, scenario: Scenario): { firms: Firm[]; recip
         capacity,
         inventory: {},
         cash: 0,
+        debt: 0,
+        underConstruction: false,
         price: 0,
         breakdown: {},
         markup: data.balance.firms.initialMarkup,
@@ -255,7 +257,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     const provinces: MarketGood['provinces'] = {};
     for (const p of provinceIds) {
       const pm = marketPrice[good]![p]!;
-      provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price };
+      provinces[p] = { price: pm.price, breakdown: { ...pm.breakdown }, referencePrice: pm.price, shortageTurns: 0 };
     }
     market[good] = { price, breakdown: national, referencePrice: price, provinces };
   }
@@ -358,6 +360,8 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
     logisticsWork: plan.work,
     gdp,
     budgetBalance: 0,
+    firmsOpened: [],
+    firmsClosed: [],
   };
 
   return {

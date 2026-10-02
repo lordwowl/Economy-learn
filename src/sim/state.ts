@@ -16,6 +16,10 @@ export interface Firm {
   /** Запасы: выход и входы. */
   inventory: Record<GoodId, number>;
   cash: number;
+  /** Долг банку. */
+  debt: number;
+  /** Строится: мощность появится, когда созреет отложенный эффект firmReady. */
+  underConstruction: boolean;
   /** Цена выхода, назначенная на этот ход. */
   price: number;
   /** Разложение цены: input.<товар>, wage, markup, expectations. Σ = price. */
@@ -50,6 +54,8 @@ export interface ProvinceMarket {
   breakdown: Breakdown;
   /** P_ref провинции: стартовая цена, опорная для спроса. */
   referencePrice: number;
+  /** Сколько ходов подряд в провинции устойчивый дефицит товара (для входа новых фирм). */
+  shortageTurns: number;
 }
 
 export interface MarketGood {
@@ -125,7 +131,8 @@ export interface Bank {
 export type PendingEffect =
   | { type: 'demandRate'; delta: number }
   | { type: 'creditRate'; delta: number }
-  | { type: 'roadLane'; route: string };
+  | { type: 'roadLane'; route: string }
+  | { type: 'firmReady'; firm: string; capacity: number };
 
 export interface Metrics {
   cpi: number;
@@ -150,6 +157,10 @@ export interface Metrics {
   gdp: number;
   /** Сальдо бюджета за ход: доходы − расходы. */
   budgetBalance: number;
+  /** Фирмы, о стройке которых решили в этот ход. */
+  firmsOpened: string[];
+  /** Фирмы, закрывшиеся в этот ход. */
+  firmsClosed: string[];
 }
 
 export interface WorldState {

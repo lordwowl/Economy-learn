@@ -41,12 +41,16 @@
   },
   "labor": {
     "naturalUnemployment": 0.05,
-    "wageAdjustSpeed": 0.2
+    "wageAdjustSpeed": 0.2,
+    "maxMonthlyWageCut": 0.01
   },
   "credit": {
     "loanSpread": 0.03,
+    "maxDebtToMonthlySales": 3,
     "expansionRoiMargin": 0.02,
+    "entryShortageThreshold": 0.05,
     "entryShortageTurns": 3,
+    "entryMinUtilization": 0.9,
     "entryMinMarkup": 0.15
   },
   "expectations": {
