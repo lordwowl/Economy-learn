@@ -1,6 +1,7 @@
 import scenarioRaw from '../../data/scenarios/baseline.json';
 import { getGameData, loadScenario, type GameData, type Scenario } from '../../src/data';
 import { createInitialState, Rng, step, type Action, type CauseEvent, type WorldState } from '../../src/sim';
+import { bankHeldGovernmentDebt } from '../../src/sim/systems/government';
 import type { Policy } from '../../tools/policies';
 
 export const SEED = 42;
@@ -52,7 +53,8 @@ export function runPolicy(turns: number, policy: Policy, data: GameData = getGam
 
 export function totalMoney(state: WorldState): number {
   // Кредит создаёт деньги вместе с долгом, поэтому сохраняется «деньги − долги (+ списанные долги)».
-  let total = state.government.cash + state.bank.cash - state.government.debt - state.bank.writtenOff;
+  // Займ государства у населения (облигации) денег не создаёт; создаёт только долг банку.
+  let total = state.government.cash + state.bank.cash - bankHeldGovernmentDebt(state) - state.bank.writtenOff;
   for (const c of state.logistics.carriers) total += c.cash - c.debt;
   for (const p of state.provinces) total += p.households.cash - p.households.debt;
   for (const f of state.firms) total += f.cash - f.debt;

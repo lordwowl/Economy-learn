@@ -93,3 +93,14 @@ describe('субсидии (GDD 5.11, лаг 5.12)', () => {
     }
   });
 });
+
+describe('госдолг: займ у населения, а не новые деньги (GDD 5.11)', () => {
+  it('дефицит закрывается облигациями населения; денег у населения меньше на сумму займа', () => {
+    const base = passive.states[0]!.government.transfersPerCapita;
+    const r = run(6, (t) => (t === 1 ? [{ type: 'setTransfers', perCapita: base * 1.5 }] : []));
+    const s = r.states[3]!;
+    const bonds = s.provinces.reduce((a, p) => a + p.households.bonds, 0);
+    expect(s.government.debt).toBeGreaterThan(0);
+    expect(bonds).toBeCloseTo(s.government.debt, 6);
+  });
+});

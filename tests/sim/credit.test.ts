@@ -74,7 +74,7 @@ describe('кредит (GDD 5.8)', () => {
 });
 
 describe('кредит населению (GDD 5.5)', () => {
-  const hh = { population: 100, laborForce: 60, cash: 0, referenceSpendingPerCapita: 1, debt: 0, income: 0, lastIncome: 1000 };
+  const hh = { population: 100, laborForce: 60, cash: 0, referenceSpendingPerCapita: 1, debt: 0, bonds: 0, income: 0, lastIncome: 1000 };
 
   it('желаемый долг = d0 × доход при нейтральной ставке и меньше при высокой', () => {
     expect(householdTargetDebt(hh, balance.demand.neutralRate, balance)).toBeCloseTo(

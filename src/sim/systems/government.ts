@@ -61,11 +61,30 @@ export function governmentRate(state: WorldState, gdp: number, government: Balan
  * Конец хода: проценты по долгу (в банк), трансферты, затем дефицит закрывается займом,
  * а профицит гасит долг. Банк отдаёт свои доходы владельцам — населению.
  */
+/** Облигации у населения: Σ по провинциям. Остальной госдолг держит банк. */
+export function householdBonds(state: WorldState): number {
+  return state.provinces.reduce((sum, p) => sum + p.households.bonds, 0);
+}
+
+/** Госдолг банку — единственная часть госдолга, которая создала деньги. */
+export function bankHeldGovernmentDebt(state: WorldState): number {
+  return state.government.debt - householdBonds(state);
+}
+
+/**
+ * Конец хода (GDD 5.11): проценты по долгу держателям облигаций (население) и банку, трансферты;
+ * затем дефицит закрывается займом — население покупает облигации на свои деньги (пропорционально деньгам),
+ * а если денег у населения не хватает, остаток выкупает банк (деньги создаются). Профицит гасит сначала
+ * долг банку (деньги уничтожаются), потом облигации населения. Банк отдаёт доходы владельцам — населению.
+ * Займ, в отличие от эмиссии, не создаёт новых денег: он перекладывает сбережения населения в бюджет.
+ */
 export function settleBudget(state: WorldState, gdp: number, government: Balance['government']): void {
   const gov = state.government;
-  const interest = gov.debt * annualToMonthly(governmentRate(state, gdp, government));
-  addSpending(state, BUDGET.interest, interest);
-  state.bank.cash += interest;
+  const rate = annualToMonthly(governmentRate(state, gdp, government));
+  const bonds = householdBonds(state);
+  addSpending(state, BUDGET.interest, gov.debt * rate);
+  payHouseholds(state, bonds * rate, (p) => p.households.bonds);
+  state.bank.cash += (gov.debt - bonds) * rate;
 
   const population = state.provinces.reduce((sum, p) => sum + p.households.population, 0);
   const transfers = gov.transfersPerCapita * population;
@@ -73,10 +92,26 @@ export function settleBudget(state: WorldState, gdp: number, government: Balance
   payHouseholds(state, transfers, (p) => p.households.population);
 
   if (gov.cash < 0) {
-    gov.debt -= gov.cash;
+    const need = -gov.cash;
+    const savings = state.provinces.reduce((sum, p) => sum + Math.max(0, p.households.cash), 0);
+    const fromHouseholds = Math.min(need, savings);
+    for (const p of state.provinces) {
+      const take = savings > 0 ? (fromHouseholds * Math.max(0, p.households.cash)) / savings : 0;
+      p.households.cash -= take;
+      p.households.bonds += take;
+    }
+    gov.debt += need;
     gov.cash = 0;
   } else if (gov.debt > 0) {
     const repay = Math.min(gov.cash, gov.debt);
+    // Сначала — долг банку, затем облигации населения (деньги возвращаются держателям).
+    const toHouseholds = repay - Math.min(repay, bankHeldGovernmentDebt(state));
+    const held = householdBonds(state);
+    for (const p of state.provinces) {
+      const back = held > 0 ? (toHouseholds * p.households.bonds) / held : 0;
+      p.households.bonds -= back;
+      p.households.cash += back;
+    }
     gov.debt -= repay;
     gov.cash -= repay;
   }

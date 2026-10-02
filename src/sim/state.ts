@@ -41,6 +41,8 @@ export interface Households {
   referenceSpendingPerCapita: number;
   /** Долг банку (потребительский кредит). */
   debt: number;
+  /** Государственные облигации у населения (сбережения, приносят проценты; не тратятся на покупки). */
+  bonds: number;
   /** Доходы за текущий ход (зарплата, трансферты, дивиденды, проценты банка) — копятся по ходу хода. */
   income: number;
   /** Доходы за прошлый ход: от них считается желаемый долг. */
@@ -147,6 +149,7 @@ export type TaxKind = 'sales' | 'profit' | 'income';
 export interface Government {
   /** Деньги на счёте. В конце хода дефицит закрывается займом, профицит гасит долг. */
   cash: number;
+  /** Госдолг: облигации у населения + остаток, который держит банк. */
   debt: number;
   taxes: Record<TaxKind, number>;
   transfersPerCapita: number;

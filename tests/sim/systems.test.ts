@@ -76,6 +76,7 @@ describe('demand (GDD 5.5)', () => {
     cash: (refSpending * 100) / spendingShare(balance.demand.neutralRate, balance.demand),
     referenceSpendingPerCapita: refSpending,
     debt: 0,
+    bonds: 0,
     income: 0,
     lastIncome: 0,
   };

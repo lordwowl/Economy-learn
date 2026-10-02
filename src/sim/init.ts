@@ -380,6 +380,7 @@ export function createInitialState(data: GameData, scenario: Scenario): WorldSta
       cash: Math.max(0, (perCapita * p.population) / s - wageIncome),
       referenceSpendingPerCapita: perCapita,
       debt: 0,
+      bonds: 0,
       // В равновесии доходы ≈ траты; в начале первого хода income станет lastIncome.
       income: perCapita * p.population,
       lastIncome: perCapita * p.population,
