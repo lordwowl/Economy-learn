@@ -40,7 +40,7 @@
       "shape": "diamond",
       "owner": "state",
       "recipe": "fuel",
-      "capacity": 60,
+      "capacity": 200,
       "cost": 2000,
       "buildTurns": 6
     },
@@ -51,7 +51,12 @@
       "shape": "triangle",
       "owner": "state",
       "storageCapacity": 500,
-      "storedGoods": ["grain", "flour", "bread", "fuel"],
+      "storedGoods": [
+        "grain",
+        "flour",
+        "bread",
+        "fuel"
+      ],
       "cost": 300,
       "buildTurns": 2
     },
@@ -62,7 +67,9 @@
       "shape": "triangle",
       "owner": "state",
       "storageCapacity": 1000,
-      "storedGoods": ["grain"],
+      "storedGoods": [
+        "grain"
+      ],
       "cost": 350,
       "buildTurns": 2
     },

@@ -14,5 +14,8 @@
   "building.refinery": "НПЗ",
   "building.warehouse": "Склад",
   "building.elevator": "Элеватор",
-  "building.roadLane": "Полоса дороги"
+  "building.roadLane": "Полоса дороги",
+  "province.north": "Северная провинция",
+  "province.center": "Центральная провинция",
+  "province.south": "Южная провинция"
 }

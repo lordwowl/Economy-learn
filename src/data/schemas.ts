@@ -96,10 +96,8 @@ const lagSchema = z
   .refine((lag) => lag.first <= lag.full, 'lag: first должен быть ≤ full');
 
 const demandGoodSchema = z.strictObject({
-  /** base_i из GDD 5.5: потребление на душу при P = P_ref и B = B_ref. */
+  /** base_i из GDD 5.5: потребление на душу при P = P_ref и B = B_ref (P_ref и B_ref — стартовые значения уровня). */
   basePerCapita: positive,
-  /** P_ref_i из GDD 5.5. */
-  referencePrice: positive,
   /** ε_i: ценовая эластичность, ≤ 0. */
   priceElasticity: z.number().max(0),
   /** η_i: эластичность по доходу. */
@@ -115,6 +113,10 @@ export const balanceSchema = z.strictObject({
       targetCoverage: positive,
       /** Окно средних продаж для покрытия, ходов. */
       salesAverageTurns: turns,
+      /** Верхняя граница покрытия (запас / средние заказы), в месяцах заказов. */
+      coverageCap: positive,
+      /** k: какую долю разрыва покрытия фирма закрывает за ход (1 = весь сразу). */
+      inventoryAdjustSpeed: z.number().gt(0).max(1),
       initialMarkup: z.number().finite(),
       /** m_min, m_max. */
       markupMin: z.number().finite(),
@@ -125,11 +127,18 @@ export const balanceSchema = z.strictObject({
       priceStickiness: share,
       /** γ — доля ожидаемой инфляции, закладываемая в цену. */
       expectedInflationPassThrough: share,
+      /** Сколько месяцев издержек фирма держит на счёте; остальное — дивиденды. */
+      cashBufferTurns: nonNegative,
+      /** Доля избытка денег сверх буфера, выплачиваемая владельцам за ход. */
+      dividendPayoutShare: share,
       /** N месяцев убытков до закрытия (GDD 5.8). */
       closeAfterLossTurns: turns,
     })
     .refine((f) => f.markupMin <= f.initialMarkup && f.initialMarkup <= f.markupMax, {
       message: 'firms: нужно markupMin ≤ initialMarkup ≤ markupMax',
+    })
+    .refine((f) => f.targetCoverage <= f.coverageCap, {
+      message: 'firms: нужно targetCoverage ≤ coverageCap',
     }),
   demand: z.strictObject({
     /** s0. */
@@ -186,9 +195,48 @@ export const balanceSchema = z.strictObject({
     .record(id, positive)
     .refine((w) => Object.keys(w).length > 0, 'cpiWeights: нужен хотя бы один товар'),
   /** Задержки решений, ходов (GDD 5.12). Задержки строек — в buildings.json. */
-  lags: z.record(id, lagSchema),
+  lags: z.strictObject({
+    keyRateToCredit: lagSchema,
+    keyRateToDemand: lagSchema,
+    keyRateToPrices: lagSchema,
+    subsidyToPrice: lagSchema,
+    tariffToImportPrice: lagSchema,
+    tariffToSubstitution: lagSchema,
+    priceCeilingToShortage: lagSchema,
+  }),
 });
 
+// ---------- scenarios/*.json ----------
+// Стартовое состояние экономики. Уровни (M11) будут включать такой же блок.
+
+export const scenarioSchema = z.strictObject({
+  /** Стартовая зарплата за единицу труда. */
+  wage: positive,
+  /** Стартовая ключевая ставка, годовая доля. */
+  keyRate: z.number().finite(),
+  /** Доверие к ЦБ C ∈ [0, 1] (GDD 5.9). */
+  trust: share,
+  provinces: z
+    .array(
+      z.strictObject({
+        id,
+        nameKey: i18nKey,
+        population: positive,
+        laborForce: positive,
+      }),
+    )
+    .min(1),
+  firms: z.array(
+    z.strictObject({
+      building: id,
+      province: id,
+      count: z.number().int().positive(),
+    }),
+  ),
+});
+
+export type Scenario = z.infer<typeof scenarioSchema>;
+export type Lag = z.infer<typeof lagSchema>;
 export type Good = z.infer<typeof goodSchema>;
 export type Recipe = z.infer<typeof recipeSchema>;
 export type Building = z.infer<typeof buildingSchema>;

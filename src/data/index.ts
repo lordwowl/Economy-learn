@@ -4,7 +4,7 @@ import goods from '../../data/goods.json';
 import recipes from '../../data/recipes.json';
 import { loadGameData, type GameData } from './load';
 
-export { loadGameData, GameDataError, type GameData, type RawGameData } from './load';
+export { loadGameData, loadScenario, GameDataError, type GameData, type RawGameData } from './load';
 export type * from './schemas';
 
 let cached: GameData | undefined;
