@@ -1,0 +1,7 @@
+{
+  "app.title": "Цепочка",
+  "app.subtitle": "Экономический симулятор",
+  "menu.play": "Играть",
+  "menu.comingSoon": "Скоро здесь появится первый уровень.",
+  "app.version": "Версия {version}"
+}
