@@ -37,7 +37,10 @@ const actions: Record<number, Action[]> = {
   2: [{ type: 'shock', shock: 'harvestFailure' }],
   3: [{ type: 'setPriceCeiling', good: 'bread', price: 600 }],
   4: [{ type: 'reserveBuy', good: 'fuel', province: 'north', quantity: 100 }],
-  5: [{ type: 'shock', shock: 'refineryAccident' }, { type: 'setKeyRate', rate: 0.1 }],
+  5: [
+    { type: 'shock', shock: 'refineryAccident' },
+    { type: 'setKeyRate', rate: 0.1 },
+  ],
   6: [{ type: 'reserveRelease', good: 'fuel', province: 'north', quantity: 100 }],
   8: [{ type: 'setTransfers', perCapita: 200 }],
 };
@@ -85,6 +88,15 @@ describe('«Почему?»', () => {
     expect(lines.length).toBeLessThanOrEqual(3);
     for (let i = 1; i < lines.length; i++) expect(Math.abs(lines[i - 1]!.value)).toBeGreaterThanOrEqual(Math.abs(lines[i]!.value));
     expect(formatWhyLine(lines[0]!)).toMatch(/^[▲▼] .+ — \d+%$/);
+  });
+
+  it('доля причины — в общем движении: от 0 до 100%, по всем причинам в сумме 100%', () => {
+    for (const e of events) {
+      if (e.causes.length === 0) continue;
+      const lines = why(e, contextFromState(everything.states.at(-1)!), e.causes.length);
+      for (const l of lines) expect(Math.abs(l.share)).toBeLessThanOrEqual(1 + 1e-12);
+      expect(lines.reduce((s, l) => s + Math.abs(l.share), 0)).toBeCloseTo(1, 9);
+    }
   });
 
   it('пример: название цены по провинции', () => {
