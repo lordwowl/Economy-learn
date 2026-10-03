@@ -18,20 +18,22 @@ export function MapView({ layout, buildings, state, prev }: Props) {
   const map = useRef<WorldMap | null>(null);
   const latest = useRef(state);
   latest.current = state;
-  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  // Не загрузился код карты (нет сети) или не поддерживается графика — разные сообщения.
+  const [status, setStatus] = useState<'loading' | 'ready' | 'offline' | 'unsupported'>('loading');
 
   useEffect(() => {
     let disposed = false;
-    import('../render/WorldMap')
-      .then(({ WorldMap }) =>
-        WorldMap.create(container.current!, { layout, buildings, provinceName: (id) => provinceName(latest.current, id) }),
-      )
-      .then((created) => {
-        if (disposed) return created.destroy();
-        map.current = created;
-        setStatus('ready');
-      })
-      .catch(() => setStatus('failed'));
+    import('../render/WorldMap').then(
+      ({ WorldMap }) =>
+        WorldMap.create(container.current!, { layout, buildings, provinceName: (id) => provinceName(latest.current, id) })
+          .then((created) => {
+            if (disposed) return created.destroy();
+            map.current = created;
+            setStatus('ready');
+          })
+          .catch(() => !disposed && setStatus('unsupported')),
+      () => !disposed && setStatus('offline'),
+    );
     return () => {
       disposed = true;
       map.current?.destroy();
@@ -46,7 +48,16 @@ export function MapView({ layout, buildings, state, prev }: Props) {
   return (
     <div class="map" ref={container} role="img" aria-label={t('game.mapLabel')}>
       {status === 'loading' && <p class="map__status">{t('game.mapLoading')}</p>}
-      {status === 'failed' && <p class="map__status">{t('game.mapUnsupported')}</p>}
+      {status === 'unsupported' && <p class="map__status">{t('game.mapUnsupported')}</p>}
+      {status === 'offline' && (
+        <div class="map__status">
+          <p>{t('game.mapOffline')}</p>
+          {/* Неудачный import() браузер запоминает — повторить можно только перезагрузкой; игра уже сохранена. */}
+          <button type="button" class="chip" onClick={() => globalThis.location.reload()}>
+            {t('game.mapRetry')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
