@@ -188,11 +188,17 @@ body {
   display: block;
 }
 
+.map__status p {
+  margin: 0;
+}
+
 .map__status {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 8px;
   margin: 0;
   padding: 16px;
   text-align: center;
